@@ -44,13 +44,13 @@
 
 ## 🎯 Objective
 
-Do-It-To-It enables developers and teams to manage tasks efficiently through a versatile Spring Boot application offering both **interactive console** and **modern web interfaces**. Built with industry-standard patterns, it demonstrates enterprise-grade Java development while remaining lightweight and easily deployable.
+Do-It-To-It enables developers and teams to manage tasks efficiently through a versatile Spring Boot application offering both **interactive console** and **modern web interfaces**. Built with industry-standard patterns and optimized for performance, it demonstrates enterprise-grade Java development while remaining lightweight and easily deployable.
 
 ---
 
 ## 💡 Expected Benefit
 
-This application benefits **Java developers, project managers, and development teams** seeking a comprehensive task management solution. Do-It-To-It offers practical insights into **Spring Boot best practices, RESTful API design, and dual-interface architecture** while providing a production-ready foundation for enterprise task management systems.
+This application benefits **Java developers, project managers, and development teams** seeking a comprehensive task management solution. Do-It-To-It offers practical insights into **Spring Boot best practices, RESTful API design, and dual-interface architecture** while providing a production-ready foundation for enterprise task management systems. The codebase has been optimized to eliminate redundancies and follows clean architecture principles.
 
 ---
 
@@ -76,7 +76,9 @@ This application benefits **Java developers, project managers, and development t
 ### 🏗️ **Enterprise Architecture**
 - **Spring Boot 3.5.5** – Latest stable framework with auto-configuration
 - **Clean Architecture** – Separated concerns with controller, service, and model layers
+- **Singleton Data Management** – Consistent data state across web and console modes
 - **Maven Build System** – Dependency management and build automation
+- **Optimized Project Structure** – Redundancy-free codebase with proper separation
 - **Cross-Platform Ready** – Runs on Windows, macOS, and Linux
 
 ---
@@ -102,17 +104,16 @@ Do-It-To-It/
 │   │       └── java/
 │   │           └── io/github/hillmatthew2000/do_it_to_it/
 │   │               └── DoItToItApplicationTests.java
-│   ├── target/                                     # Compiled artifacts
+│   ├── target/                                     # Build artifacts (not tracked)
 │   │   └── do-it-to-it-0.0.1-SNAPSHOT.jar
 │   ├── pom.xml                                     # Maven configuration
 │   ├── mvnw & mvnw.cmd                            # Maven wrapper scripts
-│   ├── compile-and-run.bat                        # Build & run script
 │   └── run.bat                                     # Quick run script
 ├── LICENSE
 └── README.md
 ```
 
-This structure implements **Spring Boot best practices** with clear separation between **presentation**, **business logic**, and **data models**, making the project scalable and maintainable.
+This structure implements **Spring Boot best practices** with clear separation between **presentation**, **business logic**, and **data models**, making the project scalable and maintainable. The project has been optimized to remove redundancies and follows clean architecture principles.
 
 ---
 
@@ -212,6 +213,30 @@ flowchart TD
 
 ---
 
+## 🧹 Project Optimizations
+
+This project has been thoroughly optimized to eliminate redundancies and improve maintainability:
+
+### ✅ **Code Quality Improvements**
+- **Singleton Data Management** – Fixed data isolation issues between web controller instances
+- **Clean Maven Configuration** – Removed unnecessary empty XML elements from pom.xml
+- **Optimized HTML Interface** – Fixed JavaScript references to non-existent properties
+- **Consolidated Build Scripts** – Removed redundant batch files in favor of Maven wrapper
+
+### 🗑️ **Removed Redundancies**
+- **Empty Build Directory** – Eliminated unnecessary `build/` folder
+- **Auto-generated Files** – Removed `HELP.md` that shouldn't be tracked
+- **Duplicate Scripts** – Consolidated to single, focused `run.bat` script
+- **Unused XML Elements** – Cleaned up pom.xml structure
+
+### 📊 **Performance Benefits**
+- **Consistent Data State** – Web API and console mode now share data properly
+- **Faster Build Times** – Streamlined Maven configuration
+- **Reduced Project Size** – Eliminated unnecessary files and dependencies
+- **Better User Experience** – Fixed web interface display issues
+
+---
+
 ## ⚙️ Installation
 
 ### Prerequisites
@@ -243,10 +268,10 @@ java -jar target/do-it-to-it-0.0.1-SNAPSHOT.jar
 # Navigate to project
 cd "C:\Do-It-To-It\do-it-to-it"
 
-# Run with Maven (Web + Console)
+# Run with Maven (Web + Console) - Recommended
 .\mvnw.cmd spring-boot:run
 
-# Run with custom batch file
+# Run with optimized batch file (Web mode)
 cmd /c run.bat
 ```
 
@@ -462,6 +487,7 @@ java -jar do-it-to-it-0.0.1-SNAPSHOT.jar --spring
 - ⭐ **Integration Tests** for API endpoints
 - ⭐ **Performance Testing** and load testing
 - ⭐ **Code Coverage** reporting with JaCoCo
+- ✅ **Code Quality Optimization** – Removed redundancies and improved architecture
 
 ### ☁️ **Deployment & DevOps**
 - ⭐ **Docker Containerization** for easy deployment
@@ -586,7 +612,7 @@ MIT License © 2025 Matthew Hill
 
 ---
 
-*Built with ❤️ using Java 21, Spring Boot 3.5.5, and modern web technologies*
+*Built with ❤️ using Java 21, Spring Boot 3.5.5, and modern web technologies. Optimized for performance and maintainability.*
 
 ---
 
