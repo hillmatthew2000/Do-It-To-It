@@ -108,7 +108,8 @@ Do-It-To-It/
 │   │   └── do-it-to-it-0.0.1-SNAPSHOT.jar
 │   ├── pom.xml                                     # Maven configuration
 │   ├── mvnw & mvnw.cmd                            # Maven wrapper scripts
-│   └── run.bat                                     # Quick run script
+│   ├── console.bat                                 # Console mode launcher
+│   └── run.bat                                     # Web mode launcher
 ├── LICENSE
 └── README.md
 ```
@@ -226,7 +227,7 @@ This project has been thoroughly optimized to eliminate redundancies and improve
 ### 🗑️ **Removed Redundancies**
 - **Empty Build Directory** – Eliminated unnecessary `build/` folder
 - **Auto-generated Files** – Removed `HELP.md` that shouldn't be tracked
-- **Duplicate Scripts** – Consolidated to single, focused `run.bat` script
+- **Duplicate Scripts** – Created focused batch files: `console.bat` and `run.bat` for specific modes
 - **Unused XML Elements** – Cleaned up pom.xml structure
 
 ### 📊 **Performance Benefits**
@@ -239,9 +240,45 @@ This project has been thoroughly optimized to eliminate redundancies and improve
 
 ## ⚙️ Installation
 
+> **⚠️ JAVA_HOME Issues? Use This Quick Fix:**
+> 
+> If you get "JAVA_HOME environment variable is not defined correctly" error:
+> ```powershell
+> # Navigate to project and use batch files instead:
+> cd "C:\Do-It-To-It\do-it-to-it"
+> cmd /c console.bat    # For console mode
+> cmd /c run.bat        # For web mode
+> ```
+> These bypass JAVA_HOME requirements and get you running immediately!
+
 ### Prerequisites
 - **Java 21** – [Download from Eclipse Adoptium](https://adoptium.net/) *(Required)*
+- **JAVA_HOME** – Environment variable pointing to your JDK installation *(Required for Maven)*
 - **Maven 3.6+** – Included via Maven Wrapper *(Automatic)*
+
+### 🔍 **Environment Verification**
+
+Before running the application, verify your Java setup:
+
+```powershell
+# Windows - Check Java installation and JAVA_HOME
+java --version
+echo $env:JAVA_HOME
+
+# If JAVA_HOME is not set, set it:
+setx JAVA_HOME "C:\Program Files\Eclipse Adoptium\jdk-21.0.8.9-hotspot"
+# Then restart your terminal
+```
+
+```bash
+# Linux/macOS - Check Java installation and JAVA_HOME
+java --version
+echo $JAVA_HOME
+
+# If JAVA_HOME is not set, add to your shell profile:
+export JAVA_HOME=/path/to/your/jdk
+export PATH=$JAVA_HOME/bin:$PATH
+```
 
 ### 🚀 Quick Start
 
@@ -250,16 +287,24 @@ This project has been thoroughly optimized to eliminate redundancies and improve
 git clone https://github.com/hillmatthew2000/Do-It-To-It.git
 cd Do-It-To-It/do-it-to-it
 
-# Option 1: Use Maven Wrapper (Recommended)
+# Option 1: Console mode with batch file (Windows - No JAVA_HOME required)
+cmd /c console.bat
+
+# Option 2: Console mode direct command (No JAVA_HOME required on Windows)
+# Windows:
+"C:\Program Files\Eclipse Adoptium\jdk-21.0.8.9-hotspot\bin\java.exe" -jar target/do-it-to-it-0.0.1-SNAPSHOT.jar
+# Linux/macOS:
+java -jar target/do-it-to-it-0.0.1-SNAPSHOT.jar
+
+# Option 3: Web mode with batch file (Windows - No JAVA_HOME required)
+cmd /c run.bat
+
+# Option 4: Use Maven Wrapper (Requires JAVA_HOME)
 ./mvnw spring-boot:run
 
-# Option 2: Build and run JAR
+# Option 5: Build and run JAR manually
 ./mvnw clean package
 java -jar target/do-it-to-it-0.0.1-SNAPSHOT.jar --spring
-
-# Option 3: Console mode only
-./mvnw clean package
-java -jar target/do-it-to-it-0.0.1-SNAPSHOT.jar
 ```
 
 ### 🪟 Windows Quick Commands
@@ -268,12 +313,26 @@ java -jar target/do-it-to-it-0.0.1-SNAPSHOT.jar
 # Navigate to project
 cd "C:\Do-It-To-It\do-it-to-it"
 
-# Run with Maven (Web + Console) - Recommended
-.\mvnw.cmd spring-boot:run
+# ⭐ CONSOLE MODE: Easy batch file (No JAVA_HOME required)
+cmd /c console.bat
 
-# Run with optimized batch file (Web mode)
+# 🌐 WEB MODE: Run with batch file (No JAVA_HOME required)  
 cmd /c run.bat
+
+# Manual command (Console Mode):
+"C:\Program Files\Eclipse Adoptium\jdk-21.0.8.9-hotspot\bin\java.exe" -jar target/do-it-to-it-0.0.1-SNAPSHOT.jar
+
+# Alternative: Run with Maven (requires JAVA_HOME to be set)
+.\mvnw.cmd spring-boot:run
 ```
+
+**💡 Available Batch Files:**
+- **`console.bat`**: Launches console mode using full Java path (bypasses JAVA_HOME issues)
+- **`run.bat`**: Launches web mode at http://localhost:8080 using full Java path
+
+**💡 Console vs Web Mode:**
+- **Console Mode**: Interactive command-line interface for task management
+- **Web Mode**: Browser-based interface at http://localhost:8080
 
 ---
 
@@ -281,9 +340,21 @@ cmd /c run.bat
 
 ### Console Mode
 
+### Console Mode
+
 Launch the **interactive console interface**:
 
-```bash
+```powershell
+# Windows - Easy way using batch file
+cmd /c console.bat
+
+# Windows - Direct command (console mode only)
+"C:\Program Files\Eclipse Adoptium\jdk-21.0.8.9-hotspot\bin\java.exe" -jar target/do-it-to-it-0.0.1-SNAPSHOT.jar
+
+# Or if you have JAVA_HOME set properly:
+java -jar target/do-it-to-it-0.0.1-SNAPSHOT.jar
+
+# Linux/macOS - Console mode only
 java -jar target/do-it-to-it-0.0.1-SNAPSHOT.jar
 ```
 
@@ -416,16 +487,11 @@ curl http://localhost:8080/api/todos/stats
 ### Application Properties
 
 ```properties
-# Server configuration
-server.port=8080
-
 # Spring Boot configuration
 spring.application.name=do-it-to-it
 
-# Development settings
-spring.devtools.restart.enabled=true
-spring.devtools.restart.poll-interval=2s
-spring.devtools.restart.quiet-period=1s
+# Note: Default server.port=8080 (Spring Boot default)
+# Note: DevTools auto-configuration enabled via Maven dependency
 ```
 
 ### Build Configuration
@@ -505,6 +571,28 @@ java -jar do-it-to-it-0.0.1-SNAPSHOT.jar --spring
 - ✅ Install [Java 21 from Eclipse Adoptium](https://adoptium.net/)
 - ✅ Ensure Java is added to your system PATH
 - ✅ Verify installation: `java --version`
+
+**`JAVA_HOME environment variable is not defined correctly`**
+- ✅ **Windows**: Set JAVA_HOME to your JDK installation path
+  ```powershell
+  # Find your Java installation
+  where java
+  
+  # Set JAVA_HOME (example path - adjust to your installation)
+  setx JAVA_HOME "C:\Program Files\Eclipse Adoptium\jdk-21.0.8.9-hotspot"
+  
+  # Restart PowerShell/Command Prompt after setting
+  ```
+- ✅ **Linux/macOS**: Add to your shell profile (.bashrc, .zshrc, etc.)
+  ```bash
+  export JAVA_HOME=/path/to/your/jdk
+  export PATH=$JAVA_HOME/bin:$PATH
+  ```
+- ✅ **Alternative**: Use the full Java path directly
+  ```powershell
+  # Windows - use full path in run.bat or direct execution
+  "C:\Program Files\Eclipse Adoptium\jdk-21.0.8.9-hotspot\bin\java.exe" -jar target/do-it-to-it-0.0.1-SNAPSHOT.jar --spring
+  ```
 
 **`mvnw: permission denied` (Linux/macOS)**
 - ✅ Make Maven wrapper executable: `chmod +x mvnw`
