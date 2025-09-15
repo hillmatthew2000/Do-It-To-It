@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Do-It-To-It - Todo App</tit                li.innerHTML = `
+                    <div class="task-text">
+                        <strong>ID ${task.id}:</strong> ${task.description}
+                        <br><small>Status: ${task.status}</small>
+                    </div>`    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .add-task {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 30px;
+        }
+        input[type="text"] {
+            flex: 1;
+            padding: 12px;
+            border: 2px solid #ddd;
+            border-radius: 5px;
+            font-size: 16px;
+        }
+        button {
+            padding: 12px 20px;
+            background: #007bff;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        button:hover {
+            background: #0056b3;
+        }
+        button.delete {
+            background: #dc3545;
+            padding: 8px 12px;
+            font-size: 14px;
+        }
+        button.delete:hover {
+            background: #c82333;
+        }
+        button.complete {
+            background: #28a745;
+            padding: 8px 12px;
+            font-size: 14px;
+        }
+        button.complete:hover {
+            background: #218838;
+        }
+        .task-list {
+            list-style: none;
+            padding: 0;
+        }
+        .task-item {
+            background: #f8f9fa;
+            margin-bottom: 10px;
+            padding: 15px;
+            border-radius: 5px;
+            border-left: 4px solid #007bff;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .task-item.completed {
+            background: #d4edda;
+            border-left-color: #28a745;
+        }
+        .task-item.completed .task-text {
+            text-decoration: line-through;
+            color: #6c757d;
+        }
+        .task-actions {
+            display: flex;
+            gap: 10px;
+        }
+        .stats {
+            background: #e9ecef;
+            padding: 15px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+        .stats-item {
+            display: inline-block;
+            margin: 0 15px;
+        }
+        .error {
+            color: #dc3545;
+            margin-top: 10px;
+        }
+        .success {
+            color: #28a745;
+            margin-top: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎯 Do-It-To-It - Todo App</h1>
+        
+        <div class="stats" id="stats">
+            <div class="stats-item"><strong>Total Tasks:</strong> <span id="totalTasks">0</span></div>
+            <div class="stats-item"><strong>Completed:</strong> <span id="completedTasks">0</span></div>
+            <div class="stats-item"><strong>Pending:</strong> <span id="pendingTasks">0</span></div>
+        </div>
+
+        <div class="add-task">
+            <input type="text" id="taskInput" placeholder="Enter a new task..." maxlength="255">
+            <button onclick="addTask()">Add Task</button>
+        </div>
+
+        <div id="message"></div>
+
+        <ul class="task-list" id="taskList">
+            <!-- Tasks will be loaded here -->
+        </ul>
+    </div>
+
+    <script>
+        const API_BASE = '/api/todos';
+
+        // Load tasks and stats when page loads
+        document.addEventListener('DOMContentLoaded', function() {
+            loadTasks();
+            loadStats();
+        });
+
+        // Allow Enter key to add task
+        document.getElementById('taskInput').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                addTask();
+            }
+        });
+
+        async function loadTasks() {
+            try {
+                const response = await fetch(API_BASE);
+                const tasks = await response.json();
+                displayTasks(tasks);
+            } catch (error) {
+                showMessage('Error loading tasks: ' + error.message, 'error');
+            }
+        }
+
+        async function loadStats() {
+            try {
+                const response = await fetch(API_BASE + '/stats');
+                const stats = await response.json();
+                document.getElementById('totalTasks').textContent = stats.totalTasks;
+                document.getElementById('completedTasks').textContent = stats.completedTasks;
+                document.getElementById('pendingTasks').textContent = stats.pendingTasks;
+            } catch (error) {
+                console.error('Error loading stats:', error);
+            }
+        }
+
+        function displayTasks(tasks) {
+            const taskList = document.getElementById('taskList');
+            taskList.innerHTML = '';
+
+            if (tasks.length === 0) {
+                taskList.innerHTML = '<li style="text-align: center; color: #6c757d; padding: 20px;">No tasks yet. Add one above!</li>';
+                return;
+            }
+
+            tasks.forEach(task => {
+                const li = document.createElement('li');
+                li.className = `task-item ${task.status.toLowerCase() === 'completed' ? 'completed' : ''}`;
+                
+                li.innerHTML = `
+                    <div class="task-text">
+                        <strong>ID ${task.id}:</strong> ${task.description}
+                        <br><small>Status: ${task.status} | Created: ${new Date(task.createdAt).toLocaleString()}</small>
+                    </div>
+                    <div class="task-actions">
+                        ${task.status.toLowerCase() !== 'completed' ? 
+                            `<button class="complete" onclick="markCompleted(${task.id})">✓ Complete</button>` : 
+                            '<span style="color: #28a745;">✓ Done</span>'
+                        }
+                        <button class="delete" onclick="deleteTask(${task.id})">🗑 Delete</button>
+                    </div>
+                `;
+                
+                taskList.appendChild(li);
+            });
+        }
+
+        async function addTask() {
+            const input = document.getElementById('taskInput');
+            const description = input.value.trim();
+
+            if (!description) {
+                showMessage('Please enter a task description', 'error');
+                return;
+            }
+
+            try {
+                const response = await fetch(API_BASE, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ description: description })
+                });
+
+                const result = await response.json();
+
+                if (response.ok) {
+                    input.value = '';
+                    showMessage('Task added successfully!', 'success');
+                    loadTasks();
+                    loadStats();
+                } else {
+                    showMessage('Error: ' + result.error, 'error');
+                }
+            } catch (error) {
+                showMessage('Error adding task: ' + error.message, 'error');
+            }
+        }
+
+        async function markCompleted(taskId) {
+            try {
+                const response = await fetch(`${API_BASE}/${taskId}/complete`, {
+                    method: 'PATCH'
+                });
+
+                const result = await response.json();
+
+                if (response.ok) {
+                    showMessage('Task marked as completed!', 'success');
+                    loadTasks();
+                    loadStats();
+                } else {
+                    showMessage('Error marking task as completed', 'error');
+                }
+            } catch (error) {
+                showMessage('Error: ' + error.message, 'error');
+            }
+        }
+
+        async function deleteTask(taskId) {
+            if (!confirm('Are you sure you want to delete this task?')) {
+                return;
+            }
+
+            try {
+                const response = await fetch(`${API_BASE}/${taskId}`, {
+                    method: 'DELETE'
+                });
+
+                const result = await response.json();
+
+                if (response.ok) {
+                    showMessage('Task deleted successfully!', 'success');
+                    loadTasks();
+                    loadStats();
+                } else {
+                    showMessage('Error deleting task', 'error');
+                }
+            } catch (error) {
+                showMessage('Error: ' + error.message, 'error');
+            }
+        }
+
+        function showMessage(message, type) {
+            const messageDiv = document.getElementById('message');
+            messageDiv.textContent = message;
+            messageDiv.className = type;
+            
+            setTimeout(() => {
+                messageDiv.textContent = '';
+                messageDiv.className = '';
+            }, 5000);
+        }
+    </script>
+</body>
+</html>
