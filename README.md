@@ -209,7 +209,7 @@ flowchart TD
     classDef storageColor fill:#51cf66,stroke:#40c057,color:#fff
     classDef successColor fill:#00b894,stroke:#00a085,color:#fff
     classDef errorColor fill:#e03131,stroke:#d63031,color:#fff
-    classDev updateColor fill:#a29bfe,stroke:#6c5ce7,color:#fff
+    classDef updateColor fill:#a29bfe,stroke:#6c5ce7,color:#fff
 ```
 
 ---
