@@ -1,10 +1,10 @@
 package io.github.hillmatthew2000.do_it_to_it;
 
-import org.springframework.web.bind.annotation.*;
-import org.springframework.http.ResponseEntity;
-import org.springframework.stereotype.Component;
 import java.util.List;
 import java.util.Map;
+import org.springframework.http.ResponseEntity;
+import org.springframework.stereotype.Component;
+import org.springframework.web.bind.annotation.*;
 
 /**
  * Singleton ToDoManager to ensure data consistency across the application.
@@ -12,7 +12,7 @@ import java.util.Map;
 @Component
 class SingletonToDoManager {
     private static ToDoManager instance;
-    
+
     public static synchronized ToDoManager getInstance() {
         if (instance == null) {
             instance = new ToDoManager();
@@ -33,13 +33,13 @@ class SingletonToDoManager {
 @RequestMapping("/api/todos")
 @CrossOrigin(origins = "*")
 public class TodoController {
-    
+
     private final ToDoManager todoManager;
-    
+
     public TodoController() {
         this.todoManager = SingletonToDoManager.getInstance();
     }
-    
+
     /**
      * Get all tasks
      * GET /api/todos
@@ -48,7 +48,7 @@ public class TodoController {
     public List<Task> getAllTasks() {
         return todoManager.getAllTasks();
     }
-    
+
     /**
      * Get a specific task by ID
      * GET /api/todos/{id}
@@ -61,7 +61,7 @@ public class TodoController {
         }
         return ResponseEntity.notFound().build();
     }
-    
+
     /**
      * Create a new task
      * POST /api/todos
@@ -70,53 +70,46 @@ public class TodoController {
     public ResponseEntity<Map<String, Object>> createTask(@RequestBody Map<String, String> request) {
         String description = request.get("description");
         if (description == null || description.trim().isEmpty()) {
-            return ResponseEntity.badRequest()
-                .body(Map.of("error", "Description is required"));
+            return ResponseEntity.badRequest().body(Map.of("error", "Description is required"));
         }
-        
+
         try {
             int taskId = todoManager.addTask(description.trim());
             Task newTask = todoManager.findTaskById(taskId);
             return ResponseEntity.ok(Map.of(
-                "message", "Task created successfully",
-                "taskId", taskId,
-                "task", newTask
-            ));
+                    "message", "Task created successfully",
+                    "taskId", taskId,
+                    "task", newTask));
         } catch (IllegalArgumentException e) {
-            return ResponseEntity.badRequest()
-                .body(Map.of("error", e.getMessage()));
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
         }
     }
-    
+
     /**
      * Update a task's description
      * PUT /api/todos/{id}
      */
     @PutMapping("/{id}")
-    public ResponseEntity<Map<String, Object>> updateTask(@PathVariable int id, @RequestBody Map<String, String> request) {
+    public ResponseEntity<Map<String, Object>> updateTask(
+            @PathVariable int id, @RequestBody Map<String, String> request) {
         String description = request.get("description");
         if (description == null || description.trim().isEmpty()) {
-            return ResponseEntity.badRequest()
-                .body(Map.of("error", "Description is required"));
+            return ResponseEntity.badRequest().body(Map.of("error", "Description is required"));
         }
-        
+
         try {
             boolean updated = todoManager.updateTaskDescription(id, description.trim());
             if (updated) {
                 Task updatedTask = todoManager.findTaskById(id);
-                return ResponseEntity.ok(Map.of(
-                    "message", "Task updated successfully",
-                    "task", updatedTask
-                ));
+                return ResponseEntity.ok(Map.of("message", "Task updated successfully", "task", updatedTask));
             } else {
                 return ResponseEntity.notFound().build();
             }
         } catch (IllegalArgumentException e) {
-            return ResponseEntity.badRequest()
-                .body(Map.of("error", e.getMessage()));
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
         }
     }
-    
+
     /**
      * Mark a task as completed
      * PATCH /api/todos/{id}/complete
@@ -126,15 +119,12 @@ public class TodoController {
         boolean updated = todoManager.markTaskCompleted(id);
         if (updated) {
             Task updatedTask = todoManager.findTaskById(id);
-            return ResponseEntity.ok(Map.of(
-                "message", "Task marked as completed",
-                "task", updatedTask
-            ));
+            return ResponseEntity.ok(Map.of("message", "Task marked as completed", "task", updatedTask));
         } else {
             return ResponseEntity.notFound().build();
         }
     }
-    
+
     /**
      * Delete a task
      * DELETE /api/todos/{id}
@@ -148,7 +138,7 @@ public class TodoController {
             return ResponseEntity.notFound().build();
         }
     }
-    
+
     /**
      * Get application statistics
      * GET /api/todos/stats
@@ -157,13 +147,15 @@ public class TodoController {
     public Map<String, Object> getStats() {
         List<Task> allTasks = todoManager.getAllTasks();
         long completedTasks = allTasks.stream()
-            .filter(task -> "Completed".equalsIgnoreCase(task.getStatus()))
-            .count();
-        
+                .filter(task -> "Completed".equalsIgnoreCase(task.getStatus()))
+                .count();
+
         return Map.of(
-            "totalTasks", allTasks.size(),
-            "completedTasks", completedTasks,
-            "pendingTasks", allTasks.size() - completedTasks
-        );
+                "totalTasks",
+                allTasks.size(),
+                "completedTasks",
+                completedTasks,
+                "pendingTasks",
+                allTasks.size() - completedTasks);
     }
 }
