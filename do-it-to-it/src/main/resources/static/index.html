@@ -3,11 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Do-It-To-It - Todo App</tit                li.innerHTML = `
-                    <div class="task-text">
-                        <strong>ID ${task.id}:</strong> ${task.description}
-                        <br><small>Status: ${task.status}</small>
-                    </div>`    <style>
+    <title>Do-It-To-It - Todo App</title>
+    <style>
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             max-width: 800px;
@@ -137,6 +134,17 @@
 
     <script>
         const API_BASE = '/api/todos';
+        const STATUS_LABELS = { PENDING: 'Pending', IN_PROGRESS: 'In progress', COMPLETED: 'Completed' };
+
+        // Errors are RFC 9457 problem details; fall back to the HTTP status text.
+        async function errorMessage(response) {
+            try {
+                const problem = await response.json();
+                return problem.detail || problem.title || response.statusText;
+            } catch {
+                return response.statusText;
+            }
+        }
 
         // Load tasks and stats when page loads
         document.addEventListener('DOMContentLoaded', function() {
@@ -154,6 +162,9 @@
         async function loadTasks() {
             try {
                 const response = await fetch(API_BASE);
+                if (!response.ok) {
+                    throw new Error(await errorMessage(response));
+                }
                 const tasks = await response.json();
                 displayTasks(tasks);
             } catch (error) {
@@ -184,22 +195,38 @@
 
             tasks.forEach(task => {
                 const li = document.createElement('li');
-                li.className = `task-item ${task.status.toLowerCase() === 'completed' ? 'completed' : ''}`;
+                li.className = `task-item ${task.status === 'COMPLETED' ? 'completed' : ''}`;
                 
-                li.innerHTML = `
-                    <div class="task-text">
-                        <strong>ID ${task.id}:</strong> ${task.description}
-                        <br><small>Status: ${task.status} | Created: ${new Date(task.createdAt).toLocaleString()}</small>
-                    </div>
-                    <div class="task-actions">
-                        ${task.status.toLowerCase() !== 'completed' ? 
-                            `<button class="complete" onclick="markCompleted(${task.id})">✓ Complete</button>` : 
-                            '<span style="color: #28a745;">✓ Done</span>'
-                        }
-                        <button class="delete" onclick="deleteTask(${task.id})">🗑 Delete</button>
-                    </div>
-                `;
-                
+                const done = task.status === 'COMPLETED';
+                const text = document.createElement('div');
+                text.className = 'task-text';
+                const label = document.createElement('strong');
+                label.textContent = `ID ${task.id}: `;
+                const meta = document.createElement('small');
+                meta.textContent = `Status: ${STATUS_LABELS[task.status] || task.status} | Created: ${new Date(task.createdAt).toLocaleString()}`;
+                text.append(label, document.createTextNode(task.description), document.createElement('br'), meta);
+
+                const actions = document.createElement('div');
+                actions.className = 'task-actions';
+                if (done) {
+                    const badge = document.createElement('span');
+                    badge.style.color = '#28a745';
+                    badge.textContent = '✓ Done';
+                    actions.append(badge);
+                } else {
+                    const complete = document.createElement('button');
+                    complete.className = 'complete';
+                    complete.textContent = '✓ Complete';
+                    complete.addEventListener('click', () => markCompleted(task.id));
+                    actions.append(complete);
+                }
+                const remove = document.createElement('button');
+                remove.className = 'delete';
+                remove.textContent = '🗑 Delete';
+                remove.addEventListener('click', () => deleteTask(task.id));
+                actions.append(remove);
+
+                li.append(text, actions);
                 taskList.appendChild(li);
             });
         }
@@ -222,15 +249,13 @@
                     body: JSON.stringify({ description: description })
                 });
 
-                const result = await response.json();
-
                 if (response.ok) {
                     input.value = '';
                     showMessage('Task added successfully!', 'success');
                     loadTasks();
                     loadStats();
                 } else {
-                    showMessage('Error: ' + result.error, 'error');
+                    showMessage('Error: ' + await errorMessage(response), 'error');
                 }
             } catch (error) {
                 showMessage('Error adding task: ' + error.message, 'error');
@@ -243,14 +268,12 @@
                     method: 'PATCH'
                 });
 
-                const result = await response.json();
-
                 if (response.ok) {
                     showMessage('Task marked as completed!', 'success');
                     loadTasks();
                     loadStats();
                 } else {
-                    showMessage('Error marking task as completed', 'error');
+                    showMessage('Error marking task as completed: ' + await errorMessage(response), 'error');
                 }
             } catch (error) {
                 showMessage('Error: ' + error.message, 'error');
@@ -267,14 +290,12 @@
                     method: 'DELETE'
                 });
 
-                const result = await response.json();
-
                 if (response.ok) {
                     showMessage('Task deleted successfully!', 'success');
                     loadTasks();
                     loadStats();
                 } else {
-                    showMessage('Error deleting task', 'error');
+                    showMessage('Error deleting task: ' + await errorMessage(response), 'error');
                 }
             } catch (error) {
                 showMessage('Error: ' + error.message, 'error');

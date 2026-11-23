@@ -70,7 +70,7 @@ This application benefits **Java developers, project managers, and development t
 ### 🌐 **RESTful Web API**
 - **REST Endpoints** – Complete API for external integrations
 - **JSON Responses** – Standardized data exchange format
-- **CORS Support** – Cross-origin requests enabled
+- **CORS Support** – Opt-in via `todo.cors.allowed-origins`
 - **Statistics API** – Real-time task analytics and metrics
 
 ### 🏗️ **Enterprise Architecture**
@@ -140,7 +140,7 @@ graph TB
         BusinessRules[📋 Business Rules]:::modelColor
     end
     subgraph "🗄️ Data Layer"
-        InMemory[(🧠 In-Memory Storage)]:::dataColor
+        InMemory[(🗄️ H2 Database)]:::dataColor
         TaskList[📝 Task Collection]:::dataColor
     end
     
@@ -389,15 +389,53 @@ java -jar target/do-it-to-it-0.0.1-SNAPSHOT.jar --spring
 
 ## 🌐 API Endpoints
 
-| Method | Endpoint | Description | Example |
+| Method | Endpoint | Description | Success |
 |--------|----------|-------------|---------|
-| **GET** | `/api/todos` | Get all tasks | `curl http://localhost:8080/api/todos` |
-| **GET** | `/api/todos/{id}` | Get specific task | `curl http://localhost:8080/api/todos/1` |
-| **POST** | `/api/todos` | Create new task | `curl -X POST -H "Content-Type: application/json" -d '{"description":"Learn Spring Boot"}' http://localhost:8080/api/todos` |
-| **PUT** | `/api/todos/{id}` | Update task description | `curl -X PUT -H "Content-Type: application/json" -d '{"description":"Updated task"}' http://localhost:8080/api/todos/1` |
-| **PATCH** | `/api/todos/{id}/complete` | Mark task completed | `curl -X PATCH http://localhost:8080/api/todos/1/complete` |
-| **DELETE** | `/api/todos/{id}` | Delete task | `curl -X DELETE http://localhost:8080/api/todos/1` |
-| **GET** | `/api/todos/stats` | Get statistics | `curl http://localhost:8080/api/todos/stats` |
+| **GET** | `/api/todos?status=&q=&sort=` | List tasks. Optional filters: `status` (`PENDING`, `IN_PROGRESS`, `COMPLETED`), `q` (case-insensitive text search), `sort` (`OLDEST` (default), `NEWEST`, `PRIORITY`, `DUE_DATE`, `DESCRIPTION`) | `200` |
+| **GET** | `/api/todos/{id}` | Get one task | `200` |
+| **POST** | `/api/todos` | Create a task | `201` + `Location` header |
+| **PUT** | `/api/todos/{id}` | Replace a task (omitted optional fields reset to their defaults) | `200` |
+| **PATCH** | `/api/todos/{id}` | Change only the fields that are sent | `200` |
+| **PATCH** | `/api/todos/{id}/complete` | Mark a task completed (idempotent) | `200` |
+| **DELETE** | `/api/todos/{id}` | Delete a task | `204` |
+| **DELETE** | `/api/todos/completed` | Delete every completed task, returns `{"deleted": n}` | `200` |
+| **GET** | `/api/todos/stats` | Counts: `totalTasks`, `pendingTasks`, `inProgressTasks`, `completedTasks`, `overdueTasks` | `200` |
+
+A task looks like this:
+
+```json
+{
+  "id": 1,
+  "description": "Deploy to production",
+  "status": "PENDING",
+  "priority": "HIGH",
+  "dueDate": "2026-12-01",
+  "overdue": false,
+  "createdAt": "2026-11-23T22:01:11.878Z",
+  "updatedAt": "2026-11-23T22:01:11.878Z"
+}
+```
+
+`description` is required (1–500 characters, trimmed). `status` defaults to `PENDING`, `priority` (`LOW`, `MEDIUM`, `HIGH`) defaults to `MEDIUM`, and `dueDate` (`yyyy-MM-dd`) is optional. Status and priority values are case-insensitive, so `"in progress"` is accepted.
+
+Errors use [RFC 9457 problem details](https://www.rfc-editor.org/rfc/rfc9457) (`application/problem+json`). Validation errors also list each invalid field:
+
+```json
+{
+  "type": "about:blank",
+  "title": "Invalid request",
+  "status": 400,
+  "detail": "Description is required",
+  "instance": "/api/todos",
+  "errors": { "description": "Description is required" }
+}
+```
+
+---
+
+## 💾 Data Storage
+
+Tasks are stored in an embedded H2 database at `~/.do-it-to-it/tasks.mv.db`. The console and the web app share the same data and can run at the same time. To keep data somewhere else, pass `--todo.data-dir=<folder>` (or set the `TODO_DATA_DIR` environment variable). Flyway manages the schema through the migrations in `src/main/resources/db/migration`.
 
 ---
 
@@ -453,31 +491,17 @@ Total tasks: 1
 **API Usage Examples:**
 
 ```bash
-# Create a new task
-curl -X POST -H "Content-Type: application/json" \
-  -d '{"description":"Deploy to production"}' \
-  http://localhost:8080/api/todos
+# Create a task
+curl -i -X POST -H "Content-Type: application/json"   -d '{"description":"Deploy to production","priority":"HIGH"}'   http://localhost:8080/api/todos
 
-# Response:
-{
-  "message": "Task created successfully",
-  "taskId": 1,
-  "task": {
-    "id": 1,
-    "description": "Deploy to production",
-    "status": "Pending"
-  }
-}
+# Search open tasks, most urgent first
+curl "http://localhost:8080/api/todos?status=PENDING&q=deploy&sort=PRIORITY"
 
-# Get all tasks
-curl http://localhost:8080/api/todos
-
-# Mark task as completed
-curl -X PATCH http://localhost:8080/api/todos/1/complete
+# Start working on a task
+curl -X PATCH -H "Content-Type: application/json" -d '{"status":"IN_PROGRESS"}'   http://localhost:8080/api/todos/1
 
 # Get statistics
 curl http://localhost:8080/api/todos/stats
-# Response: {"totalTasks":3,"completedTasks":1,"pendingTasks":2}
 ```
 
 ---
@@ -622,9 +646,8 @@ java -jar do-it-to-it-0.0.1-SNAPSHOT.jar --spring
 ### Performance Optimization
 
 **For large task lists:**
-- 📊 Current implementation uses in-memory storage
-- ⚡ Suitable for hundreds of tasks
-- 🔮 Database integration planned for enterprise scale
+- 📊 Tasks are stored in an embedded H2 database
+- ⚡ Comfortable for thousands of tasks on a single machine
 
 **Memory usage:**
 - 💾 Typical usage: 50-100MB RAM
