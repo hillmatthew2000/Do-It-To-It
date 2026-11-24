@@ -1,3 +1,8 @@
 @echo off
-cd /d "C:\Do-It-To-It\do-it-to-it"
-"C:\Program Files\Eclipse Adoptium\jdk-21.0.8.9-hotspot\bin\java.exe" -jar "target\do-it-to-it-0.0.1-SNAPSHOT.jar" --spring
+rem Starts the web application (http://localhost:8080 by default). Extra arguments are passed on,
+rem e.g. run.bat --server.port=9090
+call "%~dp0launch.cmd" --spring %*
+set "RC=%ERRORLEVEL%"
+rem Keep the window open on failure so the message can be read when started by double-click.
+if not "%RC%"=="0" pause
+exit /b %RC%
