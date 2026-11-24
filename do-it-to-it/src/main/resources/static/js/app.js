@@ -41,6 +41,8 @@ const el = {
   confirmTitle: $('#confirm-title'),
   confirmText: $('#confirm-text'),
   confirmOk: $('#confirm-ok'),
+  importButton: $('#import-button'),
+  importFile: $('#import-file'),
   shortcutsDialog: $('#shortcuts-dialog'),
   shortcutsButton: $('#shortcuts-button'),
   themeButton: $('#theme-button'),
@@ -125,6 +127,7 @@ const api = {
   patch: ({ id, version }, changes) => request(`${API}/${id}`, { method: 'PATCH', body: changes, version }),
   remove: ({ id, version }) => request(`${API}/${id}`, { method: 'DELETE', version }),
   clearCompleted: () => request(`${API}/completed`, { method: 'DELETE' }),
+  importTasks: (data) => request(`${API}/import`, { method: 'POST', body: data }),
 };
 
 // ---------------------------------------------------------------------------
@@ -613,10 +616,12 @@ async function clearCompleted() {
   await refresh();
 }
 
-function confirmAction({ title, text, action }) {
+function confirmAction({ title, text, action, destructive = true }) {
   el.confirmTitle.textContent = title;
   el.confirmText.textContent = text;
   el.confirmOk.textContent = action;
+  el.confirmOk.classList.toggle('button--danger', destructive);
+  el.confirmOk.classList.toggle('button--primary', !destructive);
   el.confirmDialog.returnValue = '';
   el.confirmDialog.showModal();
   return new Promise((resolve) => {
@@ -624,6 +629,43 @@ function confirmAction({ title, text, action }) {
       once: true,
     });
   });
+}
+
+// Imports a JSON export chosen with the file picker. The server validates the whole file and adds
+// nothing if any task in it is invalid; this only reads it to say how many tasks will be added.
+async function importFromFile() {
+  const file = el.importFile.files[0];
+  el.importFile.value = ''; // so that choosing the same file again still triggers a change
+  if (!file) return;
+
+  let data;
+  try {
+    data = JSON.parse(await file.text());
+  } catch {
+    toast(`Nothing was imported: “${file.name}” is not a JSON export.`, 'error');
+    return;
+  }
+  if (Array.isArray(data?.tasks)) {
+    const count = data.tasks.length;
+    if (count === 0) {
+      toast(`“${file.name}” has no tasks in it.`);
+      return;
+    }
+    const confirmed = await confirmAction({
+      title: 'Import tasks?',
+      text: `${count} ${count === 1 ? 'task' : 'tasks'} from “${file.name}” will be added to your list.`,
+      action: 'Import',
+      destructive: false,
+    });
+    if (!confirmed) return;
+  }
+  try {
+    const { imported } = await api.importTasks(data);
+    toast(`Imported ${imported} ${imported === 1 ? 'task' : 'tasks'}`);
+  } catch (error) {
+    toast(`Nothing was imported. ${error.message}`, 'error');
+  }
+  await refresh();
 }
 
 function setStatusFilter(status) {
@@ -817,6 +859,8 @@ function init() {
   });
   el.statusFilter.addEventListener('keydown', onFilterKeydown);
   el.clearCompleted.addEventListener('click', clearCompleted);
+  el.importButton.addEventListener('click', () => el.importFile.click());
+  el.importFile.addEventListener('change', importFromFile);
   el.retry.addEventListener('click', () => {
     loadTasks({ showSkeleton: true });
     loadStats();

@@ -1,6 +1,7 @@
 package io.github.hillmatthew2000.do_it_to_it.task;
 
 import java.time.Clock;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Locale;
@@ -52,6 +53,24 @@ public class TaskService {
 
     public Task create(TaskDetails details) {
         return repository.save(new Task(details, clock.instant()));
+    }
+
+    /**
+     * Adds tasks restored from an export, keeping their original timestamps where known so that they
+     * sort as they did before. Either every task is added or, if one is invalid, none is.
+     *
+     * @return how many tasks were added
+     */
+    public int importAll(List<ImportedTask> imported) {
+        Instant now = clock.instant();
+        List<Task> created = imported.stream()
+                .map(task -> {
+                    Instant createdAt = task.createdAt() != null ? task.createdAt() : now;
+                    Instant updatedAt = task.updatedAt() != null ? task.updatedAt() : createdAt;
+                    return new Task(task.details(), createdAt, updatedAt);
+                })
+                .toList();
+        return repository.saveAll(created).size();
     }
 
     /** Replaces every editable field of the task. */

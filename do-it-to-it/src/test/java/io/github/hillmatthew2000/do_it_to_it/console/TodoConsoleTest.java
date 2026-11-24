@@ -10,23 +10,31 @@ import io.github.hillmatthew2000.do_it_to_it.task.TaskDetails;
 import io.github.hillmatthew2000.do_it_to_it.task.TaskPriority;
 import io.github.hillmatthew2000.do_it_to_it.task.TaskService;
 import io.github.hillmatthew2000.do_it_to_it.task.TaskStatus;
+import io.github.hillmatthew2000.do_it_to_it.transfer.TaskTransferService;
 import java.io.BufferedReader;
 import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.io.PrintStream;
 import java.io.Reader;
 import java.io.StringReader;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.LocalDate;
 import java.util.List;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.autoconfigure.ImportAutoConfiguration;
+import org.springframework.boot.autoconfigure.jackson.JacksonAutoConfiguration;
 import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 @DataJpaTest
-@Import({TaskService.class, TestClockConfig.class})
+@Import({TaskService.class, TaskTransferService.class, TestClockConfig.class})
+@ImportAutoConfiguration(JacksonAutoConfiguration.class)
 class TodoConsoleTest {
 
     /** The date of {@link TestClockConfig#START}. */
@@ -35,6 +43,12 @@ class TodoConsoleTest {
     @Autowired
     TaskService service;
 
+    @Autowired
+    TaskTransferService transfer;
+
+    @TempDir
+    Path tempDir;
+
     private String run(String... lines) {
         return run(new BufferedReader(new StringReader(String.join("\n", lines) + "\n")));
     }
@@ -42,7 +56,7 @@ class TodoConsoleTest {
     private String run(BufferedReader in) {
         var bytes = new ByteArrayOutputStream();
         var out = new PrintStream(bytes, true, StandardCharsets.UTF_8);
-        new TodoConsole(service, in, out).run();
+        new TodoConsole(service, transfer, in, out).run();
         return bytes.toString(StandardCharsets.UTF_8);
     }
 
@@ -213,6 +227,65 @@ class TodoConsoleTest {
         assertThat(service.listAll()).extracting(Task::getDescription).containsExactly("Still to do");
 
         assertThat(run("7", "0")).contains("There are no completed tasks to clear.");
+    }
+
+    @Test
+    void exportsToJsonAndImportsItBack() {
+        service.create(new TaskDetails("Pay rent", TaskStatus.IN_PROGRESS, TaskPriority.HIGH, TODAY));
+        create("Walk the dog");
+        Path file = tempDir.resolve("backup.json");
+
+        assertThat(run("8", file.toString(), "0")).contains("Exported 2 tasks to " + file + ".");
+        assertThat(file).content(StandardCharsets.UTF_8).contains("\"description\" : \"Pay rent\"");
+
+        String output = run("9", "\"" + file + "\"", "y", "0");
+
+        assertThat(output)
+                .contains("Add the 2 tasks in this file to your list?")
+                .contains("Imported 2 tasks.");
+        assertThat(service.listAll())
+                .extracting(Task::details)
+                .containsExactly(
+                        new TaskDetails("Pay rent", TaskStatus.IN_PROGRESS, TaskPriority.HIGH, TODAY),
+                        TaskDetails.of("Walk the dog"),
+                        new TaskDetails("Pay rent", TaskStatus.IN_PROGRESS, TaskPriority.HIGH, TODAY),
+                        TaskDetails.of("Walk the dog"));
+    }
+
+    @Test
+    void exportsCsvWhenTheFileNameSaysSoAndAsksBeforeOverwriting() throws IOException {
+        create("Walk the dog");
+        Path file = tempDir.resolve("tasks.csv");
+        Files.writeString(file, "keep me");
+
+        assertThat(run("8", file.toString(), "n", "0"))
+                .contains("already exists")
+                .contains("Nothing exported.");
+        assertThat(file).hasContent("keep me");
+
+        assertThat(run("8", file.toString(), "y", "0")).contains("as CSV.");
+        assertThat(file).content(StandardCharsets.UTF_8).contains("Walk the dog");
+    }
+
+    @Test
+    void exportsIntoAFolderUnderTheDefaultName() {
+        String output = run("8", tempDir.toString(), "0");
+
+        assertThat(output).contains("Exported 0 tasks to " + tempDir.resolve("do-it-to-it-tasks-2026-03-02.json"));
+    }
+
+    @Test
+    void explainsWhyAFileCannotBeImported() throws IOException {
+        Path notJson = Files.writeString(tempDir.resolve("notes.txt"), "just some notes");
+        Path invalid = Files.writeString(
+                tempDir.resolve("invalid.json"), "{\"tasks\": [{\"description\": \"ok\"}, {\"description\": \" \"}]}");
+
+        assertThat(run("9", tempDir.resolve("missing.json").toString(), "0")).contains("There is no file at");
+        assertThat(run("9", notJson.toString(), "0")).contains("Nothing imported. The file is not a valid");
+        assertThat(run("9", invalid.toString(), "y", "0"))
+                .contains("Nothing imported. Task 2 in the file: Task description cannot be empty");
+        assertThat(run("9", "", "0")).contains("Import cancelled.");
+        assertThat(service.listAll()).isEmpty();
     }
 
     // The tests below run outside the test transaction so that, as in the real console, every service

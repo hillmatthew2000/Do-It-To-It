@@ -35,6 +35,8 @@ local H2 database, and both front ends can run at the same time.
   layout that works at phone widths.
 - **Console**: a menu-driven terminal interface with an aligned task table, search, editing and
   clear-completed.
+- **Export and import**: back up every task to JSON and restore it later, or export CSV for a
+  spreadsheet. This works from the web app, the console and the API.
 - **REST API** under `/api/todos`, with an OpenAPI description and Swagger UI. Errors are returned as
   [RFC 9457](https://www.rfc-editor.org/rfc/rfc9457) problem details. ETags and `If-Match` prevent
   lost updates.
@@ -85,7 +87,7 @@ Tasks are stored in C:\Users\you\.do-it-to-it
 Open <http://localhost:8080>. Type a task and press Enter to add it, and optionally pick a priority
 and due date first. Tick the checkbox to complete a task. Click the pencil or double-click the text
 to edit a task, and use the bin to delete it. The filter, sort order and theme are remembered per
-browser.
+browser. The links under the list export your tasks as JSON or CSV and import a JSON export.
 
 You can do everything from the keyboard. Press <kbd>?</kbd> in the app for this list:
 
@@ -131,6 +133,10 @@ ID  Status       Priority  Due                   Description
  5  Completed    Medium    -                     Fix the leaking kitchen tap
 ```
 
+Option 8 exports every task to a file. Press Enter to accept the suggested
+`do-it-to-it-tasks-<date>.json`, or give a name ending in `.csv` for a spreadsheet. Option 9 imports
+a JSON export and asks for confirmation before adding its tasks.
+
 When adding or editing, due dates accept `yyyy-mm-dd`, `today` or `tomorrow`. Press Enter to keep
 the current value, or type `none` to clear the due date. The console keeps the terminal clean by
 writing its log to `<data dir>/logs/console.log`.
@@ -151,6 +157,8 @@ document is at `/v3/api-docs`.
 | `DELETE` | `/api/todos/{id}`           | Delete a task                                                      | `204`   |
 | `DELETE` | `/api/todos/completed`      | Delete every completed task and return `{"deleted": n}`            | `200`   |
 | `GET`    | `/api/todos/stats`          | Counts: total, pending, in progress, completed, overdue            | `200`   |
+| `GET`    | `/api/todos/export`         | Download every task as JSON, or as CSV with `?format=csv`          | `200`   |
+| `POST`   | `/api/todos/import`         | Add the tasks from a JSON export and return `{"imported": n}`      | `200`   |
 
 `status` is one of `PENDING`, `IN_PROGRESS` or `COMPLETED`. `sort` is one of `OLDEST` (the
 default), `NEWEST`, `PRIORITY`, `DUE_DATE` or `DESCRIPTION`. Both are case-insensitive.
@@ -193,6 +201,32 @@ curl -i -X PATCH http://localhost:8080/api/todos/3 -H 'If-Match: "0"'      -H "C
 Requests without `If-Match` are applied unconditionally, as before. The web app and the console
 both use these checks. If you edit a task in one while it is changed in the other, you are told
 about the conflict and shown the latest version instead of silently overwriting it.
+
+### Export and import
+
+An export is a JSON document that looks like this:
+
+```json
+{
+  "app": "do-it-to-it",
+  "formatVersion": 1,
+  "exportedAt": "2026-11-24T20:04:18Z",
+  "tasks": [
+    { "description": "Book a dentist appointment", "status": "PENDING", "priority": "HIGH",
+      "dueDate": "2026-12-01", "createdAt": "2026-11-24T19:40:58Z", "updatedAt": "2026-11-24T19:40:58Z" }
+  ]
+}
+```
+
+Importing adds the tasks to your list and keeps their timestamps. It never changes or removes
+existing tasks, so importing the same file twice adds the tasks twice. Ids and versions are
+assigned again. Only `tasks[].description` is required, so a hand-written file works too. If any task
+in the file is invalid, nothing is imported and the error names the task. One import can add at
+most 10,000 tasks.
+
+The CSV export is for spreadsheets and cannot be imported. It is UTF-8 with a byte-order mark so
+that Excel reads accents correctly. Cells that a spreadsheet would treat as formulas, such as
+`=SUM(...)`, are prefixed with `'`.
 
 ### Errors
 
@@ -241,7 +275,8 @@ do-it-to-it/src/main/java/io/github/hillmatthew2000/do_it_to_it/
 │   ├── TaskChanges.java       Partial update (PATCH)
 │   ├── TaskService.java       Transactional use cases: list, create, update, complete, delete, stats
 │   └── TaskRepository.java    Spring Data JPA queries
-├── web/                       REST controller, request/response records, error handling,
+├── transfer/                  JSON export/import format and CSV export, shared by both front ends
+├── web/                       REST controllers, request/response records, error handling,
 │                              OpenAPI metadata and security headers
 └── console/                   TodoConsole (menu loop) and TaskTable (text rendering)
 

@@ -1,5 +1,6 @@
 package io.github.hillmatthew2000.do_it_to_it.web;
 
+import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.hasSize;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -165,6 +166,55 @@ class TaskApiIntegrationTest {
     void conditionalChangesToMissingTasksAreReportedAsNotFound() throws Exception {
         mvc.perform(delete("/api/todos/{id}", 12345).header(HttpHeaders.IF_MATCH, "\"0\""))
                 .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void exportsAsDownloadsAndImportsTheJsonBack() throws Exception {
+        create("{\"description\":\"Pay rent\",\"priority\":\"HIGH\",\"dueDate\":\"2026-03-01\"}");
+        create("{\"description\":\"Walk the dog\",\"status\":\"COMPLETED\"}");
+
+        String json = mvc.perform(get("/api/todos/export"))
+                .andExpect(status().isOk())
+                .andExpect(content().contentType(MediaType.APPLICATION_JSON))
+                .andExpect(header().string(
+                                HttpHeaders.CONTENT_DISPOSITION,
+                                "attachment; filename=\"do-it-to-it-tasks-2026-03-02.json\""))
+                .andExpect(jsonPath("$.formatVersion").value(1))
+                .andExpect(jsonPath("$.tasks", hasSize(2)))
+                .andExpect(jsonPath("$.tasks[0].description").value("Pay rent"))
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+
+        mvc.perform(get("/api/todos/export").param("format", "CSV"))
+                .andExpect(status().isOk())
+                .andExpect(content().contentType("text/csv;charset=UTF-8"))
+                .andExpect(header().string(
+                                HttpHeaders.CONTENT_DISPOSITION,
+                                "attachment; filename=\"do-it-to-it-tasks-2026-03-02.csv\""))
+                .andExpect(content().string(containsString(",Walk the dog,COMPLETED,MEDIUM,,false,")));
+
+        mvc.perform(post("/api/todos/import")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.imported").value(2));
+        mvc.perform(get("/api/todos/stats")).andExpect(jsonPath("$.totalTasks").value(4));
+    }
+
+    @Test
+    void rejectsUnknownExportFormatsAndInvalidImports() throws Exception {
+        mvc.perform(get("/api/todos/export").param("format", "xml"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.detail").value("Unknown format 'xml'. Expected json or csv"));
+
+        mvc.perform(post("/api/todos/import")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"tasks\":[{\"description\":\"ok\"},{\"priority\":\"HIGH\"}]}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(content().contentType(MediaType.APPLICATION_PROBLEM_JSON))
+                .andExpect(jsonPath("$.detail").value("Task 2 in the file: Task description cannot be empty"));
+        mvc.perform(get("/api/todos/stats")).andExpect(jsonPath("$.totalTasks").value(0));
     }
 
     @Test

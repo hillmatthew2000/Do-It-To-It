@@ -52,9 +52,13 @@ public class Task {
     }
 
     Task(TaskDetails details, Instant now) {
+        this(details, now, now);
+    }
+
+    Task(TaskDetails details, Instant createdAt, Instant updatedAt) {
         apply(details);
-        this.createdAt = now;
-        this.updatedAt = now;
+        this.createdAt = createdAt;
+        this.updatedAt = updatedAt;
     }
 
     void update(TaskDetails details, Instant now) {

@@ -25,7 +25,7 @@ import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExcep
  * Renders API errors as RFC 9457 {@link ProblemDetail} responses. Validation failures carry an extra
  * {@code errors} member mapping each invalid field to its message.
  */
-@RestControllerAdvice(assignableTypes = TaskController.class)
+@RestControllerAdvice(assignableTypes = {TaskController.class, TaskTransferController.class})
 class ApiExceptionHandler extends ResponseEntityExceptionHandler {
 
     private static final Logger log = LoggerFactory.getLogger(ApiExceptionHandler.class);

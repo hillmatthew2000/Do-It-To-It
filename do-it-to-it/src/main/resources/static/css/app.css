@@ -227,6 +227,19 @@ kbd {
   padding: 20px;
 }
 
+.app-footer {
+  display: grid;
+  gap: 4px;
+  justify-items: center;
+}
+
+.data-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 4px;
+}
+
 .footnote {
   text-align: center;
   font-size: 13px;
@@ -249,6 +262,10 @@ kbd {
   white-space: nowrap;
   cursor: pointer;
   transition: background-color 0.15s, border-color 0.15s, color 0.15s;
+}
+
+a.button {
+  text-decoration: none;
 }
 
 .button:hover:not(:disabled) {

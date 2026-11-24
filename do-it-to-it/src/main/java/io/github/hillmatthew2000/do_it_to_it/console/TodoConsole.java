@@ -10,10 +10,17 @@ import io.github.hillmatthew2000.do_it_to_it.task.TaskSort;
 import io.github.hillmatthew2000.do_it_to_it.task.TaskStats;
 import io.github.hillmatthew2000.do_it_to_it.task.TaskStatus;
 import io.github.hillmatthew2000.do_it_to_it.task.TaskVersionConflictException;
+import io.github.hillmatthew2000.do_it_to_it.transfer.TaskExport;
+import io.github.hillmatthew2000.do_it_to_it.transfer.TaskTransferService;
 import java.io.BufferedReader;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.PrintStream;
 import java.io.UncheckedIOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.NoSuchFileException;
+import java.nio.file.Path;
 import java.time.LocalDate;
 import java.time.format.DateTimeParseException;
 import java.util.List;
@@ -33,14 +40,18 @@ public class TodoConsole {
               5  Delete a task
               6  Search tasks
               7  Clear completed tasks
+              8  Export tasks to a file
+              9  Import tasks from a file
               0  Exit""";
 
     private final TaskService tasks;
+    private final TaskTransferService transfer;
     private final BufferedReader in;
     private final PrintStream out;
 
-    public TodoConsole(TaskService tasks, BufferedReader in, PrintStream out) {
+    public TodoConsole(TaskService tasks, TaskTransferService transfer, BufferedReader in, PrintStream out) {
         this.tasks = tasks;
+        this.transfer = transfer;
         this.in = in;
         this.out = out;
     }
@@ -73,6 +84,8 @@ public class TodoConsole {
             case "5", "d", "delete" -> deleteTask();
             case "6", "s", "search" -> searchTasks();
             case "7", "clear" -> clearCompleted();
+            case "8", "export" -> exportTasks();
+            case "9", "import" -> importTasks();
             case "0", "q", "quit", "exit" -> {
                 return false;
             }
@@ -217,6 +230,71 @@ public class TodoConsole {
         }
     }
 
+    private void exportTasks() {
+        String defaultName = transfer.fileName("json");
+        String answer = promptForPath("File to write [" + defaultName + "] (end the name in .csv for a spreadsheet): ");
+        Path file = Path.of(answer.isEmpty() ? defaultName : answer).toAbsolutePath();
+        if (Files.isDirectory(file)) {
+            file = file.resolve(defaultName);
+        }
+        if (Files.exists(file) && !confirm(file + " already exists. Replace it?")) {
+            out.println("Nothing exported.");
+            return;
+        }
+        boolean csv = file.getFileName().toString().toLowerCase(Locale.ROOT).endsWith(".csv");
+        try {
+            if (csv) {
+                Files.writeString(file, transfer.exportCsv(), StandardCharsets.UTF_8);
+            } else {
+                Files.write(file, transfer.exportJson());
+            }
+        } catch (IOException e) {
+            out.println("Could not write " + file + ": " + describe(e));
+            return;
+        }
+        long count = tasks.stats().total();
+        out.println("Exported " + plural(count, "task") + " to " + file + (csv ? " as CSV." : "."));
+    }
+
+    private void importTasks() {
+        String answer = promptForPath("JSON file to import (a previous export): ");
+        if (answer.isEmpty()) {
+            out.println("Import cancelled.");
+            return;
+        }
+        Path file = Path.of(answer).toAbsolutePath();
+        TaskExport export;
+        try (InputStream content = Files.newInputStream(file)) {
+            export = transfer.read(content);
+        } catch (NoSuchFileException e) {
+            out.println("There is no file at " + file + ".");
+            return;
+        } catch (IOException e) {
+            out.println("Could not read " + file + ": " + describe(e));
+            return;
+        } catch (IllegalArgumentException e) {
+            out.println("Nothing imported. " + e.getMessage());
+            return;
+        }
+        // A file without a task list is rejected with an explanation by importTasks below.
+        if (export.tasks() != null) {
+            if (export.tasks().isEmpty()) {
+                out.println("The file has no tasks in it.");
+                return;
+            }
+            if (!confirm("Add the " + plural(export.tasks().size(), "task") + " in this file to your list?")) {
+                out.println("Nothing imported.");
+                return;
+            }
+        }
+        try {
+            int imported = transfer.importTasks(export);
+            out.println("Imported " + plural(imported, "task") + ".");
+        } catch (IllegalArgumentException e) {
+            out.println("Nothing imported. " + e.getMessage());
+        }
+    }
+
     // -------------------------------------------------------------------------------------------
     // Output
     // -------------------------------------------------------------------------------------------
@@ -336,6 +414,18 @@ public class TodoConsole {
                 }
             }
         }
+    }
+
+    /** Paths copied from Windows Explorer ("Copy as path") come wrapped in quotes. */
+    private String promptForPath(String message) {
+        String answer = prompt(message);
+        return answer.length() >= 2 && answer.startsWith("\"") && answer.endsWith("\"")
+                ? answer.substring(1, answer.length() - 1).strip()
+                : answer;
+    }
+
+    private static String describe(IOException e) {
+        return e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
     }
 
     private boolean confirm(String question) {
