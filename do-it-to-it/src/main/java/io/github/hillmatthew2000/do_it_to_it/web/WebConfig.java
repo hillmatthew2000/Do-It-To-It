@@ -6,6 +6,7 @@ import io.github.hillmatthew2000.do_it_to_it.task.TaskStatus;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.format.FormatterRegistry;
+import org.springframework.http.HttpHeaders;
 import org.springframework.web.servlet.config.annotation.CorsRegistry;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 
@@ -40,7 +41,8 @@ class WebConfig implements WebMvcConfigurer {
         if (allowedOrigins.length > 0) {
             registry.addMapping("/api/**")
                     .allowedOrigins(allowedOrigins)
-                    .allowedMethods("GET", "POST", "PUT", "PATCH", "DELETE");
+                    .allowedMethods("GET", "POST", "PUT", "PATCH", "DELETE")
+                    .exposedHeaders(HttpHeaders.ETAG, HttpHeaders.LOCATION);
         }
     }
 }

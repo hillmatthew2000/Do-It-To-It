@@ -11,6 +11,7 @@ import jakarta.validation.Valid;
 import java.net.URI;
 import java.util.List;
 import java.util.Map;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -19,16 +20,27 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
 
-/** REST API for tasks. Errors are rendered as RFC 9457 problem details by {@link ApiExceptionHandler}. */
+/**
+ * REST API for tasks. Errors are rendered as RFC 9457 problem details by {@link ApiExceptionHandler}.
+ *
+ * <p>Changes to a single task are optionally conditional: a client that sends the task's ETag in
+ * {@code If-Match} gets {@code 412 Precondition Failed} instead of overwriting a change made since it
+ * loaded the task.
+ */
 @RestController
 @RequestMapping("/api/todos")
 @Tag(name = "Tasks")
 public class TaskController {
+
+    private static final String IF_MATCH_DESCRIPTION =
+            "The task's ETag. If given, the change is only made while the task is still at that version; otherwise"
+                    + " the response is 412 Precondition Failed.";
 
     private final TaskService tasks;
 
@@ -48,9 +60,11 @@ public class TaskController {
     }
 
     @GetMapping("/{id}")
-    @Operation(summary = "Get a task")
-    public TaskResponse get(@PathVariable long id) {
-        return toResponse(tasks.get(id));
+    @Operation(
+            summary = "Get a task",
+            description = "The ETag header holds the task's version; send it back in If-Match to update safely.")
+    public ResponseEntity<TaskResponse> get(@PathVariable long id) {
+        return withETag(tasks.get(id));
     }
 
     @PostMapping
@@ -63,33 +77,47 @@ public class TaskController {
                 .path("/{id}")
                 .buildAndExpand(task.getId())
                 .toUri();
-        return ResponseEntity.created(location).body(toResponse(task));
+        return ResponseEntity.created(location).eTag(TaskETags.of(task)).body(toResponse(task));
     }
 
     @PutMapping("/{id}")
     @Operation(summary = "Replace a task", description = "Sets every field; omitted ones take their defaults.")
-    public TaskResponse replace(@PathVariable long id, @Valid @RequestBody TaskRequest request) {
-        return toResponse(tasks.replace(id, request.toDetails()));
+    public ResponseEntity<TaskResponse> replace(
+            @PathVariable long id,
+            @RequestHeader(name = HttpHeaders.IF_MATCH, required = false) @Parameter(description = IF_MATCH_DESCRIPTION)
+                    String ifMatch,
+            @Valid @RequestBody TaskRequest request) {
+        return withETag(tasks.replace(id, request.toDetails(), TaskETags.expectedVersion(ifMatch)));
     }
 
     @PatchMapping("/{id}")
     @Operation(
             summary = "Update some fields of a task",
             description = "Fields that are absent or null are left as they are.")
-    public TaskResponse update(@PathVariable long id, @Valid @RequestBody TaskPatchRequest request) {
-        return toResponse(tasks.update(id, request.toChanges()));
+    public ResponseEntity<TaskResponse> update(
+            @PathVariable long id,
+            @RequestHeader(name = HttpHeaders.IF_MATCH, required = false) @Parameter(description = IF_MATCH_DESCRIPTION)
+                    String ifMatch,
+            @Valid @RequestBody TaskPatchRequest request) {
+        return withETag(tasks.update(id, request.toChanges(), TaskETags.expectedVersion(ifMatch)));
     }
 
     @PatchMapping("/{id}/complete")
     @Operation(summary = "Mark a task completed")
-    public TaskResponse complete(@PathVariable long id) {
-        return toResponse(tasks.complete(id));
+    public ResponseEntity<TaskResponse> complete(
+            @PathVariable long id,
+            @RequestHeader(name = HttpHeaders.IF_MATCH, required = false) @Parameter(description = IF_MATCH_DESCRIPTION)
+                    String ifMatch) {
+        return withETag(tasks.complete(id, TaskETags.expectedVersion(ifMatch)));
     }
 
     @DeleteMapping("/{id}")
     @Operation(summary = "Delete a task")
-    public ResponseEntity<Void> delete(@PathVariable long id) {
-        tasks.delete(id);
+    public ResponseEntity<Void> delete(
+            @PathVariable long id,
+            @RequestHeader(name = HttpHeaders.IF_MATCH, required = false) @Parameter(description = IF_MATCH_DESCRIPTION)
+                    String ifMatch) {
+        tasks.delete(id, TaskETags.expectedVersion(ifMatch));
         return ResponseEntity.noContent().build();
     }
 
@@ -103,6 +131,10 @@ public class TaskController {
     @Operation(summary = "Count tasks by state")
     public TaskStatsResponse stats() {
         return TaskStatsResponse.from(tasks.stats());
+    }
+
+    private ResponseEntity<TaskResponse> withETag(Task task) {
+        return ResponseEntity.ok().eTag(TaskETags.of(task)).body(toResponse(task));
     }
 
     private TaskResponse toResponse(Task task) {

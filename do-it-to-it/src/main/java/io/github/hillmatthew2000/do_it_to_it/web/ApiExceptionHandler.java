@@ -1,6 +1,7 @@
 package io.github.hillmatthew2000.do_it_to_it.web;
 
 import io.github.hillmatthew2000.do_it_to_it.task.TaskNotFoundException;
+import io.github.hillmatthew2000.do_it_to_it.task.TaskVersionConflictException;
 import java.time.format.DateTimeParseException;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -34,6 +35,22 @@ class ApiExceptionHandler extends ResponseEntityExceptionHandler {
     ProblemDetail handleNotFound(TaskNotFoundException ex) {
         ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.NOT_FOUND, ex.getMessage());
         problem.setTitle("Task not found");
+        problem.setProperty("taskId", ex.getTaskId());
+        return problem;
+    }
+
+    /**
+     * A client that sent {@code If-Match} asked for the change to be conditional, so a stale version is a
+     * failed precondition (412). Without it, the only way to get here is two changes racing each other,
+     * which is a plain conflict (409).
+     */
+    @ExceptionHandler(TaskVersionConflictException.class)
+    ProblemDetail handleVersionConflict(TaskVersionConflictException ex, WebRequest request) {
+        HttpStatus status =
+                request.getHeader(HttpHeaders.IF_MATCH) != null ? HttpStatus.PRECONDITION_FAILED : HttpStatus.CONFLICT;
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(
+                status, ex.getMessage() + ". Load it again to see the latest version, then retry.");
+        problem.setTitle("Task changed");
         problem.setProperty("taskId", ex.getTaskId());
         return problem;
     }

@@ -1,5 +1,6 @@
 package io.github.hillmatthew2000.do_it_to_it.console;
 
+import io.github.hillmatthew2000.do_it_to_it.task.ExpectedVersion;
 import io.github.hillmatthew2000.do_it_to_it.task.Task;
 import io.github.hillmatthew2000.do_it_to_it.task.TaskDetails;
 import io.github.hillmatthew2000.do_it_to_it.task.TaskNotFoundException;
@@ -8,6 +9,7 @@ import io.github.hillmatthew2000.do_it_to_it.task.TaskService;
 import io.github.hillmatthew2000.do_it_to_it.task.TaskSort;
 import io.github.hillmatthew2000.do_it_to_it.task.TaskStats;
 import io.github.hillmatthew2000.do_it_to_it.task.TaskStatus;
+import io.github.hillmatthew2000.do_it_to_it.task.TaskVersionConflictException;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.PrintStream;
@@ -155,10 +157,12 @@ public class TodoConsole {
                 out.println("No changes made.");
                 return;
             }
-            tasks.replace(task.getId(), updated);
+            tasks.replace(task.getId(), updated, ExpectedVersion.of(task.getVersion()));
             out.println("Updated task " + task.getId() + ".");
         } catch (IllegalArgumentException e) {
             out.println("Error: " + e.getMessage());
+        } catch (TaskVersionConflictException | TaskNotFoundException e) {
+            reportChangedElsewhere(task, "your edits were not saved");
         }
     }
 
@@ -171,8 +175,12 @@ public class TodoConsole {
             out.println("Task " + task.get().getId() + " is already completed.");
             return;
         }
-        tasks.complete(task.get().getId());
-        out.println("Marked task " + task.get().getId() + " as completed.");
+        try {
+            tasks.complete(task.get().getId(), ExpectedVersion.of(task.get().getVersion()));
+            out.println("Marked task " + task.get().getId() + " as completed.");
+        } catch (TaskVersionConflictException | TaskNotFoundException e) {
+            reportChangedElsewhere(task.get(), "it was not marked completed");
+        }
     }
 
     private void deleteTask() {
@@ -182,8 +190,14 @@ public class TodoConsole {
         }
         printTable(List.of(task.get()));
         if (confirm("Delete this task?")) {
-            tasks.delete(task.get().getId());
-            out.println("Deleted task " + task.get().getId() + ".");
+            try {
+                tasks.delete(task.get().getId(), ExpectedVersion.of(task.get().getVersion()));
+                out.println("Deleted task " + task.get().getId() + ".");
+            } catch (TaskNotFoundException e) {
+                out.println("Task " + task.get().getId() + " had already been deleted elsewhere.");
+            } catch (TaskVersionConflictException e) {
+                reportChangedElsewhere(task.get(), "it was not deleted");
+            }
         } else {
             out.println("Nothing deleted.");
         }
@@ -210,6 +224,21 @@ public class TodoConsole {
     private void printTable(List<Task> rows) {
         out.println();
         TaskTable.render(rows, tasks.today()).forEach(out::println);
+    }
+
+    /**
+     * The task was changed or deleted (for example in the web app) after this console read it, so the
+     * change was refused rather than overwriting someone else's work.
+     */
+    private void reportChangedElsewhere(Task stale, String outcome) {
+        long id = stale.getId();
+        Optional<Task> current = tasks.find(id);
+        if (current.isEmpty()) {
+            out.println("Task " + id + " was deleted elsewhere in the meantime, so " + outcome + ".");
+            return;
+        }
+        out.println("Task " + id + " was changed elsewhere in the meantime, so " + outcome + ". It now reads:");
+        printTable(List.of(current.get()));
     }
 
     private void printSummary() {

@@ -36,9 +36,11 @@ local H2 database, and both front ends can run at the same time.
 - **Console**: a menu-driven terminal interface with an aligned task table, search, editing and
   clear-completed.
 - **REST API** under `/api/todos`, with an OpenAPI description and Swagger UI. Errors are returned as
-  [RFC 9457](https://www.rfc-editor.org/rfc/rfc9457) problem details.
+  [RFC 9457](https://www.rfc-editor.org/rfc/rfc9457) problem details. ETags and `If-Match` prevent
+  lost updates.
 - **Shared storage**: an H2 file database in your home directory, with its schema versioned by
-  Flyway. The console and the web app can be open at once.
+  Flyway. The console and the web app can be open at once, and a change made in one never silently
+  overwrites a change made in the other.
 
 ## Getting started
 
@@ -168,13 +170,31 @@ curl -i -X POST http://localhost:8080/api/todos \
   "dueDate": "2026-12-01",
   "overdue": false,
   "createdAt": "2026-11-24T19:40:58.229927Z",
-  "updatedAt": "2026-11-24T19:40:58.229927Z"
+  "updatedAt": "2026-11-24T19:40:58.229927Z",
+  "version": 0
 }
 ```
 
 The `description` field is required. It is trimmed and may be 1–500 characters long. `status`
 defaults to `PENDING`, `priority` (`LOW`, `MEDIUM` or `HIGH`) defaults to `MEDIUM`, and `dueDate`
 (`yyyy-MM-dd`) is optional.
+
+### Avoiding lost updates
+
+Every change to a task increments its `version`. Single-task responses also send the version as an
+`ETag` header, for example `ETag: "0"`. If you send that value back in `If-Match` on `PUT`, `PATCH`
+or `DELETE`, the change is only made while the task is still at that version. If someone changed it
+in the meantime, the response is `412 Precondition Failed` and nothing is overwritten:
+
+```bash
+curl -i -X PATCH http://localhost:8080/api/todos/3 -H 'If-Match: "0"'      -H "Content-Type: application/json" -d '{"status": "COMPLETED"}'
+```
+
+Requests without `If-Match` are applied unconditionally, as before. The web app and the console
+both use these checks. If you edit a task in one while it is changed in the other, you are told
+about the conflict and shown the latest version instead of silently overwriting it.
+
+### Errors
 
 Errors are `application/problem+json`. Validation failures also map each invalid field to its
 message:

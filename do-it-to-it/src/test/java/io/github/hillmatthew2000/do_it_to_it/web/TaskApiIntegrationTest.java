@@ -6,6 +6,8 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -18,6 +20,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
@@ -108,6 +111,60 @@ class TaskApiIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.deleted").value(1));
         mvc.perform(get("/api/todos")).andExpect(jsonPath("$", hasSize(2)));
+    }
+
+    @Test
+    void conditionalChangesAreRefusedOnceTheTaskHasMovedOn() throws Exception {
+        long id = create("{\"description\":\"Draft\"}");
+        mvc.perform(get("/api/todos/{id}", id))
+                .andExpect(header().string(HttpHeaders.ETAG, "\"0\""))
+                .andExpect(jsonPath("$.version").value(0));
+
+        // One client saves, based on version 0...
+        mvc.perform(put("/api/todos/{id}", id)
+                        .header(HttpHeaders.IF_MATCH, "\"0\"")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"description\":\"Saved from the console\"}"))
+                .andExpect(status().isOk())
+                .andExpect(header().string(HttpHeaders.ETAG, "\"1\""))
+                .andExpect(jsonPath("$.version").value(1));
+
+        // ...so every other change still based on version 0 is refused.
+        mvc.perform(patch("/api/todos/{id}", id)
+                        .header(HttpHeaders.IF_MATCH, "\"0\"")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"description\":\"Saved from the browser\"}"))
+                .andExpect(status().isPreconditionFailed())
+                .andExpect(content().contentType(MediaType.APPLICATION_PROBLEM_JSON))
+                .andExpect(jsonPath("$.title").value("Task changed"))
+                .andExpect(jsonPath("$.taskId").value(id));
+        mvc.perform(patch("/api/todos/{id}/complete", id).header(HttpHeaders.IF_MATCH, "\"0\""))
+                .andExpect(status().isPreconditionFailed());
+        mvc.perform(delete("/api/todos/{id}", id).header(HttpHeaders.IF_MATCH, "\"0\""))
+                .andExpect(status().isPreconditionFailed());
+        // Weak tags never match, as RFC 9110 requires strong comparison for If-Match.
+        mvc.perform(delete("/api/todos/{id}", id).header(HttpHeaders.IF_MATCH, "W/\"1\""))
+                .andExpect(status().isPreconditionFailed());
+
+        mvc.perform(get("/api/todos/{id}", id))
+                .andExpect(jsonPath("$.description").value("Saved from the console"));
+
+        // Any of several tags may match, "*" matches whatever the version, and no header means no check.
+        mvc.perform(patch("/api/todos/{id}/complete", id).header(HttpHeaders.IF_MATCH, "\"0\", \"1\""))
+                .andExpect(status().isOk())
+                .andExpect(header().string(HttpHeaders.ETAG, "\"2\""));
+        mvc.perform(patch("/api/todos/{id}", id)
+                        .header(HttpHeaders.IF_MATCH, "*")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"priority\":\"HIGH\"}"))
+                .andExpect(status().isOk());
+        mvc.perform(delete("/api/todos/{id}", id)).andExpect(status().isNoContent());
+    }
+
+    @Test
+    void conditionalChangesToMissingTasksAreReportedAsNotFound() throws Exception {
+        mvc.perform(delete("/api/todos/{id}", 12345).header(HttpHeaders.IF_MATCH, "\"0\""))
+                .andExpect(status().isNotFound());
     }
 
     @Test

@@ -8,6 +8,7 @@ import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
+import jakarta.persistence.Version;
 import java.time.Instant;
 import java.time.LocalDate;
 
@@ -40,6 +41,11 @@ public class Task {
 
     @Column(nullable = false)
     private Instant updatedAt;
+
+    /** Incremented by Hibernate on every change; see {@link ExpectedVersion}. */
+    @Version
+    @Column(nullable = false)
+    private long version;
 
     protected Task() {
         // for JPA
@@ -89,6 +95,10 @@ public class Task {
 
     public Instant getUpdatedAt() {
         return updatedAt;
+    }
+
+    public long getVersion() {
+        return version;
     }
 
     public TaskDetails details() {

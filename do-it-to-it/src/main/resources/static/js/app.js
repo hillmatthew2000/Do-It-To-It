@@ -61,20 +61,41 @@ const state = {
 // API
 // ---------------------------------------------------------------------------
 
-async function request(path, { method = 'GET', body } = {}) {
+class ApiError extends Error {
+  constructor(message, status) {
+    super(message);
+    this.status = status;
+  }
+
+  // The task was changed somewhere else, such as another tab or the console, since this page loaded
+  // it: 412 for a stale If-Match, 409 if two saves raced each other.
+  get changedElsewhere() {
+    return this.status === 412 || this.status === 409;
+  }
+
+  get notFound() {
+    return this.status === 404;
+  }
+}
+
+// `version` makes a change conditional: the server refuses it with 412 if the task has moved on.
+async function request(path, { method = 'GET', body, version } = {}) {
   const init = { method, headers: { Accept: 'application/json' } };
   if (body !== undefined) {
     init.headers['Content-Type'] = 'application/json';
     init.body = JSON.stringify(body);
   }
+  if (version !== undefined) {
+    init.headers['If-Match'] = `"${version}"`;
+  }
   let response;
   try {
     response = await fetch(path, init);
   } catch {
-    throw new Error('Cannot reach the server. Check that Do-It-To-It is still running.');
+    throw new ApiError('Cannot reach the server. Check that Do-It-To-It is still running.', 0);
   }
   if (!response.ok) {
-    throw new Error(await problemMessage(response));
+    throw new ApiError(await problemMessage(response), response.status);
   }
   return response.status === 204 ? null : response.json();
 }
@@ -96,11 +117,13 @@ const api = {
     if (query) params.set('q', query);
     return request(`${API}?${params}`);
   },
+  get: (id) => request(`${API}/${id}`),
   stats: () => request(`${API}/stats`),
   create: (task) => request(API, { method: 'POST', body: task }),
-  replace: (id, task) => request(`${API}/${id}`, { method: 'PUT', body: task }),
-  patch: (id, changes) => request(`${API}/${id}`, { method: 'PATCH', body: changes }),
-  remove: (id) => request(`${API}/${id}`, { method: 'DELETE' }),
+  // These take the task as last loaded, so that they only apply if nobody has changed it since.
+  replace: ({ id, version }, task) => request(`${API}/${id}`, { method: 'PUT', body: task, version }),
+  patch: ({ id, version }, changes) => request(`${API}/${id}`, { method: 'PATCH', body: changes, version }),
+  remove: ({ id, version }) => request(`${API}/${id}`, { method: 'DELETE', version }),
   clearCompleted: () => request(`${API}/completed`, { method: 'DELETE' }),
 };
 
@@ -315,6 +338,7 @@ function renderEditor(task) {
   form.elements.status.value = task.status;
   form.elements.priority.value = task.priority;
   form.elements.dueDate.value = task.dueDate ?? '';
+  form.dataset.version = task.version;
   form.setAttribute('aria-label', `Edit "${task.description}"`);
 
   form.addEventListener('submit', (event) => {
@@ -437,10 +461,16 @@ async function toggleTask(task) {
   const status = task.status === 'COMPLETED' ? 'PENDING' : 'COMPLETED';
   state.activeId = task.id;
   try {
-    await api.patch(task.id, { status });
+    await api.patch(task, { status });
     toast(status === 'COMPLETED' ? `Done: “${task.description}”` : `Reopened “${task.description}”`);
   } catch (error) {
-    toast(`Could not update the task. ${error.message}`, 'error');
+    if (error.changedElsewhere) {
+      toast(`“${task.description}” was changed elsewhere, so it was left alone. The list now shows the latest version.`, 'error');
+    } else if (error.notFound) {
+      toast(`“${task.description}” was deleted elsewhere.`, 'error');
+    } else {
+      toast(`Could not update the task. ${error.message}`, 'error');
+    }
   }
   await refresh();
 }
@@ -474,20 +504,63 @@ async function saveEdit(task, form) {
   }
   try {
     // PUT rather than PATCH so that clearing the due date is saved too.
-    await api.replace(task.id, {
-      description,
-      status: form.elements.status.value,
-      priority: form.elements.priority.value,
-      dueDate: form.elements.dueDate.value || null,
-    });
+    await api.replace(
+      { id: task.id, version: form.dataset.version },
+      {
+        description,
+        status: form.elements.status.value,
+        priority: form.elements.priority.value,
+        dueDate: form.elements.dueDate.value || null,
+      },
+    );
   } catch (err) {
-    showFieldError(input, error, err.message);
+    if (err.changedElsewhere) {
+      await handleEditConflict(task, form, input, error);
+    } else if (err.notFound) {
+      await handleDeletedWhileEditing(task);
+    } else {
+      showFieldError(input, error, err.message);
+    }
     return;
   }
   state.editingId = null;
   toast('Task updated');
   await refresh();
   focusRow(rowFor(task.id));
+}
+
+// Someone else saved the task while it was being edited here. Keep what was typed, but base the next
+// save on their version, so that saving again knowingly replaces it and Cancel keeps it.
+async function handleEditConflict(task, form, input, error) {
+  let latest;
+  try {
+    latest = await api.get(task.id);
+  } catch (err) {
+    if (err.notFound) {
+      await handleDeletedWhileEditing(task);
+    } else {
+      showFieldError(input, error, err.message);
+    }
+    return;
+  }
+  form.dataset.version = latest.version;
+  state.tasks = state.tasks.map((t) => (t.id === latest.id ? latest : t));
+  showFieldError(
+    input,
+    error,
+    `This task was changed elsewhere while you were editing. It now reads “${latest.description}”. ` +
+      'Save again to replace that with your version, or Cancel to keep it.',
+  );
+  input.focus();
+}
+
+async function handleDeletedWhileEditing(task) {
+  state.editingId = null;
+  toast(`“${task.description}” was deleted elsewhere, so your changes could not be saved.`, 'error');
+  await refresh();
+  const row = rowFor(state.activeId);
+  if (row) focusRow(row);
+  else el.newDescription.focus();
 }
 
 async function deleteTask(task) {
@@ -505,10 +578,17 @@ async function deleteTask(task) {
   const neighbour = all[index + 1] ?? all[index - 1];
   state.activeId = neighbour ? Number(neighbour.dataset.id) : null;
   try {
-    await api.remove(task.id);
+    await api.remove(task);
     toast(`Deleted “${task.description}”`);
   } catch (error) {
-    toast(`Could not delete the task. ${error.message}`, 'error');
+    if (error.changedElsewhere) {
+      state.activeId = task.id;
+      toast(`“${task.description}” was changed elsewhere, so it was not deleted. Check the latest version first.`, 'error');
+    } else if (error.notFound) {
+      toast(`“${task.description}” had already been deleted.`);
+    } else {
+      toast(`Could not delete the task. ${error.message}`, 'error');
+    }
   }
   await refresh();
   const next = rowFor(state.activeId);
@@ -750,6 +830,11 @@ function init() {
   el.themeButton.addEventListener('click', toggleTheme);
   el.shortcutsButton.addEventListener('click', () => el.shortcutsDialog.showModal());
   document.addEventListener('keydown', onGlobalKeydown);
+  // Pick up changes made in the console or another tab on coming back to this one. Skipped while
+  // editing so that nothing typed is lost; a conflicting save is still caught by the server.
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && state.editingId === null) refresh();
+  });
 
   loadTasks({ showSkeleton: true });
   loadStats();

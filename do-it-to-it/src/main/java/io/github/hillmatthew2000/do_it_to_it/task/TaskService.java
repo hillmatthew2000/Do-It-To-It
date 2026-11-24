@@ -4,6 +4,8 @@ import java.time.Clock;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Locale;
+import java.util.Optional;
+import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -40,7 +42,12 @@ public class TaskService {
 
     @Transactional(readOnly = true)
     public Task get(long id) {
-        return repository.findById(id).orElseThrow(() -> new TaskNotFoundException(id));
+        return find(id).orElseThrow(() -> new TaskNotFoundException(id));
+    }
+
+    @Transactional(readOnly = true)
+    public Optional<Task> find(long id) {
+        return repository.findById(id);
     }
 
     public Task create(TaskDetails details) {
@@ -48,30 +55,32 @@ public class TaskService {
     }
 
     /** Replaces every editable field of the task. */
-    public Task replace(long id, TaskDetails details) {
-        Task task = get(id);
+    public Task replace(long id, TaskDetails details, ExpectedVersion expected) {
+        Task task = getForChange(id, expected);
         task.update(details, clock.instant());
-        return task;
+        return flush(task);
     }
 
     /** Applies the non-null fields of {@code changes} to the task. */
-    public Task update(long id, TaskChanges changes) {
-        Task task = get(id);
+    public Task update(long id, TaskChanges changes, ExpectedVersion expected) {
+        Task task = getForChange(id, expected);
         task.update(changes.applyTo(task.details()), clock.instant());
-        return task;
+        return flush(task);
     }
 
     /** Marks the task as completed. Completing an already completed task is a no-op. */
-    public Task complete(long id) {
-        Task task = get(id);
+    public Task complete(long id, ExpectedVersion expected) {
+        Task task = getForChange(id, expected);
         if (!task.isCompleted()) {
             task.update(TaskChanges.status(TaskStatus.COMPLETED).applyTo(task.details()), clock.instant());
         }
-        return task;
+        return flush(task);
     }
 
-    public void delete(long id) {
-        repository.delete(get(id));
+    public void delete(long id, ExpectedVersion expected) {
+        Task task = getForChange(id, expected);
+        repository.delete(task);
+        flush(task);
     }
 
     /** Deletes every completed task and returns how many were removed. */
@@ -89,6 +98,27 @@ public class TaskService {
                 repository.countByStatus(TaskStatus.IN_PROGRESS),
                 repository.countByStatus(TaskStatus.COMPLETED),
                 repository.countByDueDateBeforeAndStatusNot(today(), TaskStatus.COMPLETED));
+    }
+
+    private Task getForChange(long id, ExpectedVersion expected) {
+        Task task = get(id);
+        if (!expected.matches(task.getVersion())) {
+            throw new TaskVersionConflictException(id);
+        }
+        return task;
+    }
+
+    /**
+     * Writes the change now rather than at commit, so that a concurrent change that slipped in after
+     * {@link #getForChange} is reported the same way as a stale expected version.
+     */
+    private Task flush(Task task) {
+        try {
+            repository.flush();
+        } catch (OptimisticLockingFailureException e) {
+            throw new TaskVersionConflictException(task.getId(), e);
+        }
+        return task;
     }
 
     /** The current date in the application's clock zone, used to decide whether tasks are overdue. */

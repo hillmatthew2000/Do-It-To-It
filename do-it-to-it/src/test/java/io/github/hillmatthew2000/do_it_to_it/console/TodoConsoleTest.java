@@ -3,6 +3,7 @@ package io.github.hillmatthew2000.do_it_to_it.console;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import io.github.hillmatthew2000.do_it_to_it.TestClockConfig;
+import io.github.hillmatthew2000.do_it_to_it.task.ExpectedVersion;
 import io.github.hillmatthew2000.do_it_to_it.task.Task;
 import io.github.hillmatthew2000.do_it_to_it.task.TaskChanges;
 import io.github.hillmatthew2000.do_it_to_it.task.TaskDetails;
@@ -12,13 +13,17 @@ import io.github.hillmatthew2000.do_it_to_it.task.TaskStatus;
 import java.io.BufferedReader;
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
+import java.io.Reader;
 import java.io.StringReader;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
 import org.springframework.context.annotation.Import;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
 
 @DataJpaTest
 @Import({TaskService.class, TestClockConfig.class})
@@ -31,9 +36,12 @@ class TodoConsoleTest {
     TaskService service;
 
     private String run(String... lines) {
+        return run(new BufferedReader(new StringReader(String.join("\n", lines) + "\n")));
+    }
+
+    private String run(BufferedReader in) {
         var bytes = new ByteArrayOutputStream();
         var out = new PrintStream(bytes, true, StandardCharsets.UTF_8);
-        var in = new BufferedReader(new StringReader(String.join("\n", lines) + "\n"));
         new TodoConsole(service, in, out).run();
         return bytes.toString(StandardCharsets.UTF_8);
     }
@@ -195,7 +203,7 @@ class TodoConsoleTest {
     @Test
     void clearsCompletedTasksAfterConfirmation() {
         Task done = create("Done already");
-        service.update(done.getId(), TaskChanges.status(TaskStatus.COMPLETED));
+        service.update(done.getId(), TaskChanges.status(TaskStatus.COMPLETED), ExpectedVersion.ANY);
         create("Still to do");
 
         assertThat(run("7", "n", "0")).contains("Delete 1 completed task?").contains("Nothing deleted.");
@@ -205,5 +213,72 @@ class TodoConsoleTest {
         assertThat(service.listAll()).extracting(Task::getDescription).containsExactly("Still to do");
 
         assertThat(run("7", "0")).contains("There are no completed tasks to clear.");
+    }
+
+    // The tests below run outside the test transaction so that, as in the real console, every service
+    // call works on its own copy of a task and a change made "elsewhere" is not visible to the console.
+
+    @Test
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    void doesNotOverwriteATaskChangedElsewhereWhileEditing() {
+        Task task = create("Refactor");
+        try {
+            var input = new ScriptedInput("3", task.getId().toString(), "My edit", "", "", "", "0")
+                    .before(
+                            3,
+                            () -> service.replace(
+                                    task.getId(), TaskDetails.of("Changed in the browser"), ExpectedVersion.ANY));
+
+            String output = run(input);
+
+            assertThat(output)
+                    .contains("Task " + task.getId()
+                            + " was changed elsewhere in the meantime, so your edits were not saved.")
+                    .contains("Changed in the browser");
+            assertThat(service.get(task.getId()).getDescription()).isEqualTo("Changed in the browser");
+        } finally {
+            service.find(task.getId()).ifPresent(t -> service.delete(t.getId(), ExpectedVersion.ANY));
+        }
+    }
+
+    @Test
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    void reportsATaskDeletedElsewhereWhileConfirmingItsDeletion() {
+        Task task = create("Delete me");
+        var input = new ScriptedInput("5", task.getId().toString(), "y", "0")
+                .before(2, () -> service.delete(task.getId(), ExpectedVersion.ANY));
+
+        String output = run(input);
+
+        assertThat(output).contains("Task " + task.getId() + " had already been deleted elsewhere.");
+    }
+
+    /** Console input that runs an action, as someone using the web app might, just before a given line is read. */
+    private static final class ScriptedInput extends BufferedReader {
+
+        private final List<String> lines;
+        private int next;
+        private int triggerIndex = -1;
+        private Runnable action;
+
+        ScriptedInput(String... lines) {
+            super(Reader.nullReader());
+            this.lines = List.of(lines);
+        }
+
+        /** Runs {@code action} just before the line at {@code index} (counting from zero) is read. */
+        ScriptedInput before(int index, Runnable action) {
+            this.triggerIndex = index;
+            this.action = action;
+            return this;
+        }
+
+        @Override
+        public String readLine() {
+            if (next == triggerIndex) {
+                action.run();
+            }
+            return next < lines.size() ? lines.get(next++) : null;
+        }
     }
 }

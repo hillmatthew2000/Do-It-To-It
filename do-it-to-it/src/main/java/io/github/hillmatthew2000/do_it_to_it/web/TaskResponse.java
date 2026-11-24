@@ -6,7 +6,10 @@ import io.github.hillmatthew2000.do_it_to_it.task.TaskStatus;
 import java.time.Instant;
 import java.time.LocalDate;
 
-/** A task as returned by the REST API. */
+/**
+ * A task as returned by the REST API. {@code version} changes on every update and is also sent as the
+ * {@code ETag} header of single-task responses.
+ */
 public record TaskResponse(
         long id,
         String description,
@@ -15,7 +18,8 @@ public record TaskResponse(
         LocalDate dueDate,
         boolean overdue,
         Instant createdAt,
-        Instant updatedAt) {
+        Instant updatedAt,
+        long version) {
 
     static TaskResponse from(Task task, LocalDate today) {
         return new TaskResponse(
@@ -26,6 +30,7 @@ public record TaskResponse(
                 task.getDueDate(),
                 task.isOverdue(today),
                 task.getCreatedAt(),
-                task.getUpdatedAt());
+                task.getUpdatedAt(),
+                task.getVersion());
     }
 }
