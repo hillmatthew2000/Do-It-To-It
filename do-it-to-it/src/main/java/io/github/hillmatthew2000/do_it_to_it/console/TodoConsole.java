@@ -1,20 +1,37 @@
 package io.github.hillmatthew2000.do_it_to_it.console;
 
 import io.github.hillmatthew2000.do_it_to_it.task.Task;
-import io.github.hillmatthew2000.do_it_to_it.task.TaskChanges;
 import io.github.hillmatthew2000.do_it_to_it.task.TaskDetails;
 import io.github.hillmatthew2000.do_it_to_it.task.TaskNotFoundException;
+import io.github.hillmatthew2000.do_it_to_it.task.TaskPriority;
 import io.github.hillmatthew2000.do_it_to_it.task.TaskService;
+import io.github.hillmatthew2000.do_it_to_it.task.TaskSort;
+import io.github.hillmatthew2000.do_it_to_it.task.TaskStats;
 import io.github.hillmatthew2000.do_it_to_it.task.TaskStatus;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.PrintStream;
 import java.io.UncheckedIOException;
+import java.time.LocalDate;
+import java.time.format.DateTimeParseException;
 import java.util.List;
+import java.util.Locale;
 import java.util.Optional;
+import java.util.function.Function;
 
 /** Menu-driven command-line interface over {@link TaskService}. */
 public class TodoConsole {
+
+    private static final String MENU = """
+            What would you like to do?
+              1  List tasks
+              2  Add a task
+              3  Edit a task
+              4  Mark a task completed
+              5  Delete a task
+              6  Search tasks
+              7  Clear completed tasks
+              0  Exit""";
 
     private final TaskService tasks;
     private final BufferedReader in;
@@ -28,121 +45,125 @@ public class TodoConsole {
 
     /** Runs the menu loop until the user exits or input ends. */
     public void run() {
-        out.println("Welcome to the Java To-Do App!");
-        out.println("================================");
+        out.println("Do-It-To-It");
+        out.println("===========");
+        printSummary();
         try {
             boolean running = true;
             while (running) {
-                displayMenu();
-                Optional<String> choice = readLine();
-                running = choice.isPresent() && handleMenuChoice(choice.get());
+                out.println();
+                out.println(MENU);
+                running = handleMenuChoice(prompt("> "));
             }
         } catch (EndOfInputException e) {
             // Input closed (Ctrl+D / Ctrl+Z or end of a piped script): exit cleanly.
+            out.println();
         }
-        out.println("Exiting the application. Goodbye!");
-    }
-
-    private void displayMenu() {
-        out.println();
-        out.println("Choose an option:");
-        out.println("1. Add Task");
-        out.println("2. List Tasks");
-        out.println("3. Update Task");
-        out.println("4. Delete Task");
-        out.println("5. Mark Task Completed");
-        out.println("6. Exit");
-        out.print("> ");
+        out.println("Goodbye!");
     }
 
     private boolean handleMenuChoice(String choice) {
-        switch (choice.trim()) {
-            case "1" -> addTask();
-            case "2" -> listTasks();
-            case "3" -> updateTask();
-            case "4" -> deleteTask();
-            case "5" -> markTaskCompleted();
-            case "6" -> {
+        switch (choice.toLowerCase(Locale.ROOT)) {
+            case "1", "l", "list" -> listTasks();
+            case "2", "a", "add" -> addTask();
+            case "3", "e", "edit" -> editTask();
+            case "4", "c", "complete", "done" -> completeTask();
+            case "5", "d", "delete" -> deleteTask();
+            case "6", "s", "search" -> searchTasks();
+            case "7", "clear" -> clearCompleted();
+            case "0", "q", "quit", "exit" -> {
                 return false;
             }
-            default -> out.println("Invalid option. Please choose a number between 1 and 6.");
+            case "" -> {
+                // Just show the menu again.
+            }
+            default -> out.println("Unknown option '" + choice + "'. Enter a number from the menu.");
         }
         return true;
     }
 
-    private void addTask() {
-        String description = prompt("Enter task description: ");
-        try {
-            Task task = tasks.create(TaskDetails.of(description));
-            out.println("Task added with ID " + task.getId() + ".");
-        } catch (IllegalArgumentException e) {
-            out.println("Error: " + e.getMessage());
-        }
-    }
+    // -------------------------------------------------------------------------------------------
+    // Menu actions
+    // -------------------------------------------------------------------------------------------
 
     private void listTasks() {
         List<Task> all = tasks.listAll();
         if (all.isEmpty()) {
-            out.println("No tasks found. Add some tasks to get started!");
+            out.println("No tasks yet. Choose 2 to add one.");
             return;
         }
-        out.println();
-        out.println("--- Your Tasks ---");
-        all.forEach(task -> out.println(format(task)));
-        out.println("Total tasks: " + all.size());
+        printTable(all);
+        printSummary();
     }
 
-    private void updateTask() {
-        Optional<Task> task = promptForTask("Enter task ID to update: ");
-        if (task.isEmpty()) {
+    private void searchTasks() {
+        String query = prompt("Search for: ");
+        if (query.isEmpty()) {
+            out.println("Search cancelled.");
             return;
         }
-        out.println("Current task: " + format(task.get()));
-        out.println("What would you like to update?");
-        out.println("1. Description");
-        out.println("2. Status");
-        String choice = prompt("> ");
+        List<Task> matches = tasks.list(null, query, TaskSort.OLDEST);
+        if (matches.isEmpty()) {
+            out.println("No tasks contain '" + query + "'.");
+            return;
+        }
+        printTable(matches);
+        out.println(matches.size() == 1 ? "1 matching task." : matches.size() + " matching tasks.");
+    }
+
+    private void addTask() {
+        String description = prompt("Description: ");
+        if (description.isEmpty()) {
+            out.println("Nothing added: the description cannot be empty.");
+            return;
+        }
+        TaskPriority priority = promptForPriority("Priority [low/MEDIUM/high]: ", TaskPriority.MEDIUM);
+        LocalDate dueDate = promptForDueDate("Due date (yyyy-mm-dd, 'today', 'tomorrow', blank for none): ", null);
         try {
-            switch (choice) {
-                case "1" -> {
-                    String description = prompt("Enter new description: ");
-                    tasks.update(task.get().getId(), new TaskChanges(description, null, null, null));
-                    out.println("Task description updated successfully.");
-                }
-                case "2" -> {
-                    String input = prompt("Enter new status (Pending, In Progress, Completed): ");
-                    Optional<TaskStatus> status = TaskStatus.parse(input);
-                    if (status.isEmpty()) {
-                        out.println("Unknown status '" + input + "'. Use Pending, In Progress or Completed.");
-                        return;
-                    }
-                    tasks.update(task.get().getId(), TaskChanges.status(status.get()));
-                    out.println("Task status updated successfully.");
-                }
-                default -> out.println("Invalid option. Please choose 1 or 2.");
-            }
+            Task task = tasks.create(new TaskDetails(description, null, priority, dueDate));
+            out.println("Added task " + task.getId() + ".");
         } catch (IllegalArgumentException e) {
             out.println("Error: " + e.getMessage());
         }
     }
 
-    private void deleteTask() {
-        Optional<Task> task = promptForTask("Enter task ID to delete: ");
-        if (task.isEmpty()) {
+    private void editTask() {
+        Optional<Task> found = promptForTask("ID of the task to edit: ");
+        if (found.isEmpty()) {
             return;
         }
-        out.println("Are you sure you want to delete this task?");
-        out.println(format(task.get()));
-        if (prompt("Enter 'yes' to confirm: ").equalsIgnoreCase("yes")) {
-            tasks.delete(task.get().getId());
-            out.println("Task " + task.get().getId() + " deleted successfully.");
-        } else {
-            out.println("Task deletion cancelled.");
+        Task task = found.get();
+        TaskDetails current = task.details();
+        printTable(List.of(task));
+        out.println("Press Enter to keep the current value.");
+
+        String description = prompt("Description [" + current.description() + "]: ");
+        TaskStatus status = promptForChoice(
+                "Status [" + current.status().label() + "] (pending/in progress/completed): ",
+                current.status(),
+                TaskStatus::parse);
+        TaskPriority priority = promptForPriority(
+                "Priority [" + current.priority().label() + "] (low/medium/high): ", current.priority());
+        LocalDate dueDate = promptForDueDate(
+                "Due date [" + (current.dueDate() == null ? "none" : current.dueDate()) + "] ('none' to clear): ",
+                current.dueDate());
+
+        try {
+            TaskDetails updated = new TaskDetails(
+                    description.isEmpty() ? current.description() : description, status, priority, dueDate);
+            if (updated.equals(current)) {
+                out.println("No changes made.");
+                return;
+            }
+            tasks.replace(task.getId(), updated);
+            out.println("Updated task " + task.getId() + ".");
+        } catch (IllegalArgumentException e) {
+            out.println("Error: " + e.getMessage());
         }
     }
 
-    private void markTaskCompleted() {
-        Optional<Task> task = promptForTask("Enter task ID to mark completed: ");
+    private void completeTask() {
+        Optional<Task> task = promptForTask("ID of the task to mark completed: ");
         if (task.isEmpty()) {
             return;
         }
@@ -151,12 +172,78 @@ public class TodoConsole {
             return;
         }
         tasks.complete(task.get().getId());
-        out.println("Task " + task.get().getId() + " marked as completed.");
+        out.println("Marked task " + task.get().getId() + " as completed.");
     }
 
+    private void deleteTask() {
+        Optional<Task> task = promptForTask("ID of the task to delete: ");
+        if (task.isEmpty()) {
+            return;
+        }
+        printTable(List.of(task.get()));
+        if (confirm("Delete this task?")) {
+            tasks.delete(task.get().getId());
+            out.println("Deleted task " + task.get().getId() + ".");
+        } else {
+            out.println("Nothing deleted.");
+        }
+    }
+
+    private void clearCompleted() {
+        long completed = tasks.stats().completed();
+        if (completed == 0) {
+            out.println("There are no completed tasks to clear.");
+            return;
+        }
+        if (confirm("Delete " + plural(completed, "completed task") + "?")) {
+            int deleted = tasks.deleteCompleted();
+            out.println("Deleted " + plural(deleted, "completed task") + ".");
+        } else {
+            out.println("Nothing deleted.");
+        }
+    }
+
+    // -------------------------------------------------------------------------------------------
+    // Output
+    // -------------------------------------------------------------------------------------------
+
+    private void printTable(List<Task> rows) {
+        out.println();
+        TaskTable.render(rows, tasks.today()).forEach(out::println);
+    }
+
+    private void printSummary() {
+        TaskStats stats = tasks.stats();
+        if (stats.total() == 0) {
+            out.println("You have no tasks.");
+            return;
+        }
+        StringBuilder summary = new StringBuilder()
+                .append(plural(stats.total(), "task"))
+                .append(": ")
+                .append(stats.pending())
+                .append(" pending, ")
+                .append(stats.inProgress())
+                .append(" in progress, ")
+                .append(stats.completed())
+                .append(" completed");
+        if (stats.overdue() > 0) {
+            summary.append(" (").append(stats.overdue()).append(" overdue)");
+        }
+        out.println(summary.append('.'));
+    }
+
+    private static String plural(long count, String noun) {
+        return count + " " + noun + (count == 1 ? "" : "s");
+    }
+
+    // -------------------------------------------------------------------------------------------
+    // Input
+    // -------------------------------------------------------------------------------------------
+
     private Optional<Task> promptForTask(String message) {
-        if (tasks.listAll().isEmpty()) {
-            out.println("No tasks available.");
+        if (tasks.stats().total() == 0) {
+            out.println("There are no tasks yet.");
             return Optional.empty();
         }
         String input = prompt(message);
@@ -164,25 +251,72 @@ public class TodoConsole {
         try {
             id = Long.parseLong(input);
         } catch (NumberFormatException e) {
-            out.println("Invalid input. Please enter a valid task ID (positive number).");
+            out.println("'" + input + "' is not a task ID. Choose 1 to list tasks and their IDs.");
             return Optional.empty();
         }
         try {
             return Optional.of(tasks.get(id));
         } catch (TaskNotFoundException e) {
-            out.println("Task with ID " + id + " not found.");
+            out.println("There is no task with ID " + id + ".");
             return Optional.empty();
         }
     }
 
-    private static String format(Task task) {
-        return String.format(
-                "ID: %d | Description: %s | Status: %s",
-                task.getId(), task.getDescription(), task.getStatus().label());
+    private TaskPriority promptForPriority(String message, TaskPriority current) {
+        return promptForChoice(message, current, TaskPriority::parse);
+    }
+
+    /** Asks until the answer parses; a blank answer keeps {@code current}. */
+    private <T> T promptForChoice(String message, T current, Function<String, Optional<T>> parser) {
+        while (true) {
+            String input = prompt(message);
+            if (input.isEmpty()) {
+                return current;
+            }
+            Optional<T> parsed = parser.apply(input);
+            if (parsed.isPresent()) {
+                return parsed.get();
+            }
+            out.println("'" + input + "' is not one of the options. Try again, or press Enter to skip.");
+        }
+    }
+
+    /** Asks until the answer is a date; a blank answer keeps {@code current} and "none" clears it. */
+    private LocalDate promptForDueDate(String message, LocalDate current) {
+        while (true) {
+            String input = prompt(message).toLowerCase(Locale.ROOT);
+            switch (input) {
+                case "" -> {
+                    return current;
+                }
+                case "none", "-" -> {
+                    return null;
+                }
+                case "today" -> {
+                    return tasks.today();
+                }
+                case "tomorrow" -> {
+                    return tasks.today().plusDays(1);
+                }
+                default -> {
+                    try {
+                        return LocalDate.parse(input);
+                    } catch (DateTimeParseException e) {
+                        out.println("'" + input + "' is not a date. Use the format yyyy-mm-dd, e.g. 2026-12-31.");
+                    }
+                }
+            }
+        }
+    }
+
+    private boolean confirm(String question) {
+        String answer = prompt(question + " [y/N]: ").toLowerCase(Locale.ROOT);
+        return answer.equals("y") || answer.equals("yes");
     }
 
     private String prompt(String message) {
         out.print(message);
+        out.flush();
         return readLine().orElseThrow(EndOfInputException::new).trim();
     }
 

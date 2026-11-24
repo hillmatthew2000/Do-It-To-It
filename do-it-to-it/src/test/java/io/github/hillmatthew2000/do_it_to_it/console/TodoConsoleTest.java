@@ -4,7 +4,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import io.github.hillmatthew2000.do_it_to_it.TestClockConfig;
 import io.github.hillmatthew2000.do_it_to_it.task.Task;
+import io.github.hillmatthew2000.do_it_to_it.task.TaskChanges;
 import io.github.hillmatthew2000.do_it_to_it.task.TaskDetails;
+import io.github.hillmatthew2000.do_it_to_it.task.TaskPriority;
 import io.github.hillmatthew2000.do_it_to_it.task.TaskService;
 import io.github.hillmatthew2000.do_it_to_it.task.TaskStatus;
 import java.io.BufferedReader;
@@ -12,6 +14,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
 import java.io.StringReader;
 import java.nio.charset.StandardCharsets;
+import java.time.LocalDate;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
@@ -20,6 +23,9 @@ import org.springframework.context.annotation.Import;
 @DataJpaTest
 @Import({TaskService.class, TestClockConfig.class})
 class TodoConsoleTest {
+
+    /** The date of {@link TestClockConfig#START}. */
+    private static final LocalDate TODAY = LocalDate.of(2026, 3, 2);
 
     @Autowired
     TaskService service;
@@ -32,61 +38,172 @@ class TodoConsoleTest {
         return bytes.toString(StandardCharsets.UTF_8);
     }
 
+    private Task create(String description) {
+        return service.create(TaskDetails.of(description));
+    }
+
     @Test
     void addsAndListsTasks() {
-        String output = run("1", "Write tests", "2", "6");
+        String output = run("2", "Write tests", "", "", "1", "0");
 
         assertThat(output)
-                .contains("Task added with ID")
+                .contains("Added task")
                 .contains("Write tests")
-                .contains("Goodbye!");
+                .contains("1 task: 1 pending, 0 in progress, 0 completed.")
+                .endsWith("Goodbye!" + System.lineSeparator());
         assertThat(service.listAll()).extracting(Task::getDescription).containsExactly("Write tests");
+    }
+
+    @Test
+    void addsTaskWithPriorityAndDueDate() {
+        run("2", "Pay rent", "high", "tomorrow", "0");
+
+        Task task = service.listAll().getFirst();
+        assertThat(task.getPriority()).isEqualTo(TaskPriority.HIGH);
+        assertThat(task.getDueDate()).isEqualTo(TODAY.plusDays(1));
+    }
+
+    @Test
+    void asksAgainForUnreadablePrioritiesAndDates() {
+        String output = run("2", "Pay rent", "urgent", "low", "31/12", "2026-12-31", "0");
+
+        assertThat(output).contains("'urgent' is not one of the options").contains("'31/12' is not a date");
+        Task task = service.listAll().getFirst();
+        assertThat(task.getPriority()).isEqualTo(TaskPriority.LOW);
+        assertThat(task.getDueDate()).isEqualTo(LocalDate.of(2026, 12, 31));
+    }
+
+    @Test
+    void doesNotAddBlankTasks() {
+        String output = run("2", "   ", "0");
+
+        assertThat(output).contains("the description cannot be empty");
+        assertThat(service.listAll()).isEmpty();
     }
 
     @Test
     void exitsCleanlyWhenInputEnds() {
         // Previously, end of input made the menu loop print errors forever.
-        String output = run("1");
+        String output = run("2");
 
         assertThat(output).endsWith("Goodbye!" + System.lineSeparator());
     }
 
     @Test
-    void updatesStatusUsingFriendlyNames() {
-        Task task = service.create(TaskDetails.of("Refactor"));
+    void acceptsWordsAsWellAsNumbersInTheMenu() {
+        String output = run("list", "quit");
 
-        run("3", task.getId().toString(), "2", "in progress", "6");
+        assertThat(output).contains("No tasks yet").endsWith("Goodbye!" + System.lineSeparator());
+    }
+
+    @Test
+    void listsTasksInAnAlignedTable() {
+        service.create(new TaskDetails("Pay rent", null, TaskPriority.HIGH, TODAY.minusDays(1)));
+        create("Write the quarterly report");
+
+        String output = run("1", "0");
+
+        assertThat(output)
+                .containsPattern("ID +Status +Priority +Due +Description")
+                .contains(TODAY.minusDays(1) + " (overdue)")
+                .contains("2 tasks: 2 pending, 0 in progress, 0 completed (1 overdue).");
+    }
+
+    @Test
+    void editsStatusUsingFriendlyNames() {
+        Task task = create("Refactor");
+
+        run("3", task.getId().toString(), "", "in progress", "", "", "0");
 
         assertThat(service.get(task.getId()).getStatus()).isEqualTo(TaskStatus.IN_PROGRESS);
     }
 
     @Test
+    void editsEveryFieldAndCanClearTheDueDate() {
+        Task task = service.create(new TaskDetails("Refactor", null, null, TODAY));
+
+        String output = run("3", task.getId().toString(), "Refactor the parser", "", "high", "none", "0");
+
+        assertThat(output).contains("Updated task " + task.getId());
+        TaskDetails details = service.get(task.getId()).details();
+        assertThat(details)
+                .isEqualTo(new TaskDetails("Refactor the parser", TaskStatus.PENDING, TaskPriority.HIGH, null));
+    }
+
+    @Test
+    void keepsEverythingWhenEditIsSkipped() {
+        Task task = create("Refactor");
+
+        String output = run("3", task.getId().toString(), "", "", "", "", "0");
+
+        assertThat(output).contains("No changes made.");
+    }
+
+    @Test
     void rejectsUnknownStatusesInsteadOfStoringThem() {
-        Task task = service.create(TaskDetails.of("Refactor"));
+        Task task = create("Refactor");
 
-        String output = run("3", task.getId().toString(), "2", "someday", "6");
+        String output = run("3", task.getId().toString(), "", "someday", "", "", "", "0");
 
-        assertThat(output).contains("Unknown status 'someday'");
+        assertThat(output).contains("'someday' is not one of the options");
         assertThat(service.get(task.getId()).getStatus()).isEqualTo(TaskStatus.PENDING);
     }
 
     @Test
     void reportsInvalidAndUnknownIds() {
-        service.create(TaskDetails.of("Exists"));
+        create("Exists");
 
-        String output = run("5", "abc", "5", "999", "6");
+        String output = run("4", "abc", "4", "999", "0");
 
-        assertThat(output).contains("Please enter a valid task ID").contains("Task with ID 999 not found.");
+        assertThat(output).contains("'abc' is not a task ID").contains("There is no task with ID 999.");
+    }
+
+    @Test
+    void marksTasksCompleted() {
+        Task task = create("Ship it");
+
+        String output = run("4", task.getId().toString(), "4", task.getId().toString(), "0");
+
+        assertThat(output)
+                .contains("Marked task " + task.getId() + " as completed.")
+                .contains("already completed");
+        assertThat(service.get(task.getId()).isCompleted()).isTrue();
     }
 
     @Test
     void deletesOnlyAfterConfirmation() {
-        Task task = service.create(TaskDetails.of("Keep me"));
+        Task task = create("Keep me");
 
-        run("4", task.getId().toString(), "no", "6");
+        run("5", task.getId().toString(), "no", "0");
         assertThat(service.listAll()).hasSize(1);
 
-        run("4", task.getId().toString(), "yes", "6");
+        run("5", task.getId().toString(), "y", "0");
         assertThat(service.listAll()).isEmpty();
+    }
+
+    @Test
+    void searchesDescriptions() {
+        create("Pay rent");
+        create("Walk the dog");
+
+        String output = run("6", "RENT", "0");
+
+        assertThat(output).contains("Pay rent").doesNotContain("Walk the dog").contains("1 matching task.");
+        assertThat(run("6", "taxes", "0")).contains("No tasks contain 'taxes'.");
+    }
+
+    @Test
+    void clearsCompletedTasksAfterConfirmation() {
+        Task done = create("Done already");
+        service.update(done.getId(), TaskChanges.status(TaskStatus.COMPLETED));
+        create("Still to do");
+
+        assertThat(run("7", "n", "0")).contains("Delete 1 completed task?").contains("Nothing deleted.");
+        assertThat(service.listAll()).hasSize(2);
+
+        assertThat(run("7", "yes", "0")).contains("Deleted 1 completed task.");
+        assertThat(service.listAll()).extracting(Task::getDescription).containsExactly("Still to do");
+
+        assertThat(run("7", "0")).contains("There are no completed tasks to clear.");
     }
 }
