@@ -1,5 +1,7 @@
 @echo off
-echo Starting Do-It-To-It Console Mode...
-echo.
-"C:\Program Files\Eclipse Adoptium\jdk-21.0.8.9-hotspot\bin\java.exe" -jar "C:\Do-It-To-It\do-it-to-it\target\do-it-to-it-0.0.1-SNAPSHOT.jar"
-pause
+rem Starts the interactive console. Extra arguments are passed on, e.g. console.bat --todo.data-dir=D:\tasks
+call "%~dp0launch.cmd" %*
+set "RC=%ERRORLEVEL%"
+rem Keep the window open on failure so the message can be read when started by double-click.
+if not "%RC%"=="0" pause
+exit /b %RC%

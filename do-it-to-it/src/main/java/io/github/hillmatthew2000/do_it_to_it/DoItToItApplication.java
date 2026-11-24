@@ -2,6 +2,7 @@ package io.github.hillmatthew2000.do_it_to_it;
 
 import io.github.hillmatthew2000.do_it_to_it.console.TodoConsole;
 import io.github.hillmatthew2000.do_it_to_it.task.TaskService;
+import io.github.hillmatthew2000.do_it_to_it.transfer.TaskTransferService;
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.io.PrintStream;
@@ -41,7 +42,8 @@ public class DoItToItApplication {
             Charset charset = System.console() != null ? System.console().charset() : Charset.defaultCharset();
             var in = new BufferedReader(new InputStreamReader(System.in, charset));
             var out = new PrintStream(System.out, true, charset);
-            new TodoConsole(context.getBean(TaskService.class), in, out).run();
+            new TodoConsole(context.getBean(TaskService.class), context.getBean(TaskTransferService.class), in, out)
+                    .run();
         }
     }
 

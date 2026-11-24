@@ -20,6 +20,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import io.github.hillmatthew2000.do_it_to_it.task.ExpectedVersion;
 import io.github.hillmatthew2000.do_it_to_it.task.TaskDetails;
 import io.github.hillmatthew2000.do_it_to_it.task.TaskFixtures;
 import io.github.hillmatthew2000.do_it_to_it.task.TaskNotFoundException;
@@ -27,6 +28,7 @@ import io.github.hillmatthew2000.do_it_to_it.task.TaskPriority;
 import io.github.hillmatthew2000.do_it_to_it.task.TaskService;
 import io.github.hillmatthew2000.do_it_to_it.task.TaskSort;
 import io.github.hillmatthew2000.do_it_to_it.task.TaskStatus;
+import io.github.hillmatthew2000.do_it_to_it.task.TaskVersionConflictException;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
@@ -155,14 +157,18 @@ class TaskControllerTest {
     }
 
     @Test
-    void nonNumericIdReturns400() throws Exception {
-        mvc.perform(get("/api/todos/abc")).andExpect(status().isBadRequest());
+    void nonNumericIdReturns400ProblemDetail() throws Exception {
+        mvc.perform(get("/api/todos/abc"))
+                .andExpect(status().isBadRequest())
+                .andExpect(content().contentType(MediaType.APPLICATION_PROBLEM_JSON))
+                .andExpect(jsonPath("$.title").value("Invalid request"))
+                .andExpect(jsonPath("$.detail").value("'abc' is not a valid value for 'id'"));
     }
 
     @Test
     void replaceSendsAllFields() throws Exception {
         var details = new TaskDetails("New", TaskStatus.IN_PROGRESS, TaskPriority.HIGH, TODAY);
-        given(service.replace(5, details)).willReturn(TaskFixtures.task(5, details, NOW));
+        given(service.replace(5, details, ExpectedVersion.ANY)).willReturn(TaskFixtures.task(5, details, NOW));
 
         mvc.perform(
                         put("/api/todos/5")
@@ -181,7 +187,7 @@ class TaskControllerTest {
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.errors.description").value("Description cannot be blank"));
 
-        given(service.update(eq(5L), any()))
+        given(service.update(eq(5L), any(), eq(ExpectedVersion.ANY)))
                 .willReturn(TaskFixtures.task(
                         5, new TaskDetails("x", TaskStatus.COMPLETED, TaskPriority.MEDIUM, null), NOW));
         mvc.perform(patch("/api/todos/5")
@@ -192,23 +198,72 @@ class TaskControllerTest {
     }
 
     @Test
+    void singleTaskResponsesCarryTheVersionAsETag() throws Exception {
+        given(service.get(5)).willReturn(TaskFixtures.task(5, TaskDetails.of("x"), NOW));
+
+        mvc.perform(get("/api/todos/5"))
+                .andExpect(status().isOk())
+                .andExpect(header().string("ETag", "\"0\""))
+                .andExpect(jsonPath("$.version").value(0));
+    }
+
+    @Test
+    void ifMatchIsPassedOnAsTheExpectedVersion() throws Exception {
+        mvc.perform(delete("/api/todos/5").header("If-Match", "\"4\"")).andExpect(status().isNoContent());
+
+        verify(service).delete(5, ExpectedVersion.of(4));
+    }
+
+    @Test
+    void staleIfMatchReturns412AndARaceWithoutItReturns409() throws Exception {
+        willThrow(new TaskVersionConflictException(5)).given(service).delete(anyLong(), any());
+
+        mvc.perform(delete("/api/todos/5").header("If-Match", "\"1\""))
+                .andExpect(status().isPreconditionFailed())
+                .andExpect(jsonPath("$.title").value("Task changed"))
+                .andExpect(jsonPath("$.detail")
+                        .value("Task 5 has been changed since it was loaded. Load it again to see the latest version,"
+                                + " then retry."));
+        mvc.perform(delete("/api/todos/5")).andExpect(status().isConflict());
+    }
+
+    @Test
     void deleteReturns204() throws Exception {
         mvc.perform(delete("/api/todos/5")).andExpect(status().isNoContent());
 
-        verify(service).delete(5);
+        verify(service).delete(5, ExpectedVersion.ANY);
     }
 
     @Test
     void deleteUnknownTaskReturns404() throws Exception {
-        willThrow(new TaskNotFoundException(9)).given(service).delete(anyLong());
+        willThrow(new TaskNotFoundException(9)).given(service).delete(anyLong(), any());
 
         mvc.perform(delete("/api/todos/9")).andExpect(status().isNotFound());
     }
 
     @Test
-    void invalidStatusFilterReturns400() throws Exception {
-        mvc.perform(get("/api/todos").param("status", "nope")).andExpect(status().isBadRequest());
+    void invalidStatusFilterReturns400ListingTheAcceptedValues() throws Exception {
+        mvc.perform(get("/api/todos").param("status", "nope"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.title").value("Invalid request"))
+                .andExpect(jsonPath("$.detail")
+                        .value("Unknown status 'nope'. Expected one of [PENDING, IN_PROGRESS, COMPLETED]"));
 
         verify(service, never()).list(any(), any(), any());
+    }
+
+    @Test
+    void invalidSortReturns400WithoutLeakingClassNames() throws Exception {
+        mvc.perform(get("/api/todos").param("sort", "random"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.title").value("Invalid request"))
+                .andExpect(jsonPath("$.detail").value(startsWith("Unknown sort 'random'. Expected one of [OLDEST")));
+    }
+
+    @Test
+    void sortIsCaseInsensitive() throws Exception {
+        given(service.list(null, null, TaskSort.DUE_DATE)).willReturn(List.of());
+
+        mvc.perform(get("/api/todos").param("sort", " due_date ")).andExpect(status().isOk());
     }
 }

@@ -3,10 +3,10 @@ package io.github.hillmatthew2000.do_it_to_it.web;
 import io.github.hillmatthew2000.do_it_to_it.task.TaskPriority;
 import io.github.hillmatthew2000.do_it_to_it.task.TaskSort;
 import io.github.hillmatthew2000.do_it_to_it.task.TaskStatus;
-import java.util.Locale;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.format.FormatterRegistry;
+import org.springframework.http.HttpHeaders;
 import org.springframework.web.servlet.config.annotation.CorsRegistry;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 
@@ -31,20 +31,9 @@ class WebConfig implements WebMvcConfigurer {
 
     @Override
     public void addFormatters(FormatterRegistry registry) {
-        registry.addConverter(
-                String.class,
-                TaskStatus.class,
-                value -> TaskStatus.parse(value)
-                        .orElseThrow(() -> new IllegalArgumentException("Unknown status '" + value + "'")));
-        registry.addConverter(
-                String.class,
-                TaskPriority.class,
-                value -> TaskPriority.parse(value)
-                        .orElseThrow(() -> new IllegalArgumentException("Unknown priority '" + value + "'")));
-        registry.addConverter(
-                String.class,
-                TaskSort.class,
-                value -> TaskSort.valueOf(value.strip().toUpperCase(Locale.ROOT)));
+        registry.addConverter(String.class, TaskStatus.class, TaskStatus::of);
+        registry.addConverter(String.class, TaskPriority.class, TaskPriority::of);
+        registry.addConverter(String.class, TaskSort.class, TaskSort::of);
     }
 
     @Override
@@ -52,7 +41,8 @@ class WebConfig implements WebMvcConfigurer {
         if (allowedOrigins.length > 0) {
             registry.addMapping("/api/**")
                     .allowedOrigins(allowedOrigins)
-                    .allowedMethods("GET", "POST", "PUT", "PATCH", "DELETE");
+                    .allowedMethods("GET", "POST", "PUT", "PATCH", "DELETE")
+                    .exposedHeaders(HttpHeaders.ETAG, HttpHeaders.LOCATION);
         }
     }
 }

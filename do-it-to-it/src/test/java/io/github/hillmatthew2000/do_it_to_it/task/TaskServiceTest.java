@@ -7,11 +7,14 @@ import io.github.hillmatthew2000.do_it_to_it.MutableClock;
 import io.github.hillmatthew2000.do_it_to_it.TestClockConfig;
 import java.time.Duration;
 import java.time.LocalDate;
+import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
 import org.springframework.context.annotation.Import;
+import org.springframework.dao.OptimisticLockingFailureException;
+import org.springframework.jdbc.core.JdbcTemplate;
 
 @DataJpaTest
 @Import({TaskService.class, TestClockConfig.class})
@@ -24,6 +27,9 @@ class TaskServiceTest {
 
     @Autowired
     MutableClock clock;
+
+    @Autowired
+    JdbcTemplate jdbc;
 
     @BeforeEach
     void resetClock() {
@@ -55,7 +61,7 @@ class TaskServiceTest {
         Task task = service.create(new TaskDetails("Draft", TaskStatus.PENDING, TaskPriority.HIGH, TODAY));
         clock.advance(Duration.ofMinutes(5));
 
-        service.replace(task.getId(), TaskDetails.of("Final"));
+        service.replace(task.getId(), TaskDetails.of("Final"), ExpectedVersion.ANY);
 
         Task replaced = service.get(task.getId());
         assertThat(replaced.details()).isEqualTo(TaskDetails.of("Final"));
@@ -67,7 +73,7 @@ class TaskServiceTest {
     void updateKeepsFieldsThatAreNotChanged() {
         Task task = service.create(new TaskDetails("Draft", TaskStatus.PENDING, TaskPriority.HIGH, TODAY));
 
-        service.update(task.getId(), new TaskChanges("  Edited  ", null, null, null));
+        service.update(task.getId(), new TaskChanges("  Edited  ", null, null, null), ExpectedVersion.ANY);
 
         assertThat(service.get(task.getId()).details())
                 .isEqualTo(new TaskDetails("Edited", TaskStatus.PENDING, TaskPriority.HIGH, TODAY));
@@ -77,10 +83,10 @@ class TaskServiceTest {
     void completeIsIdempotent() {
         Task task = service.create(TaskDetails.of("Ship it"));
         clock.advance(Duration.ofHours(1));
-        service.complete(task.getId());
+        service.complete(task.getId(), ExpectedVersion.ANY);
         clock.advance(Duration.ofHours(1));
 
-        Task completed = service.complete(task.getId());
+        Task completed = service.complete(task.getId(), ExpectedVersion.ANY);
 
         assertThat(completed.isCompleted()).isTrue();
         assertThat(completed.getUpdatedAt()).isEqualTo(TestClockConfig.START.plus(Duration.ofHours(1)));
@@ -90,10 +96,72 @@ class TaskServiceTest {
     void deleteRemovesTheTaskAndRejectsUnknownIds() {
         Task task = service.create(TaskDetails.of("Temporary"));
 
-        service.delete(task.getId());
+        service.delete(task.getId(), ExpectedVersion.ANY);
 
         assertThat(service.listAll()).isEmpty();
-        assertThatThrownBy(() -> service.delete(task.getId())).isInstanceOf(TaskNotFoundException.class);
+        assertThatThrownBy(() -> service.delete(task.getId(), ExpectedVersion.ANY))
+                .isInstanceOf(TaskNotFoundException.class);
+    }
+
+    @Test
+    void everyChangeBumpsTheVersion() {
+        Task task = service.create(TaskDetails.of("Draft"));
+        assertThat(task.getVersion()).isZero();
+
+        Task edited = service.update(task.getId(), new TaskChanges("Edited", null, null, null), ExpectedVersion.of(0));
+        assertThat(edited.getVersion()).isEqualTo(1);
+
+        Task completed = service.complete(task.getId(), ExpectedVersion.of(1));
+        assertThat(completed.getVersion()).isEqualTo(2);
+
+        // Completing a completed task changes nothing, so the version stays put.
+        assertThat(service.complete(task.getId(), ExpectedVersion.of(2)).getVersion())
+                .isEqualTo(2);
+    }
+
+    @Test
+    void changesBasedOnAStaleVersionAreRefused() {
+        Task task = service.create(TaskDetails.of("Draft"));
+        service.replace(task.getId(), TaskDetails.of("Changed elsewhere"), ExpectedVersion.of(0));
+        ExpectedVersion stale = ExpectedVersion.of(0);
+
+        assertThatThrownBy(() -> service.replace(task.getId(), TaskDetails.of("Mine"), stale))
+                .isInstanceOf(TaskVersionConflictException.class)
+                .hasMessage("Task " + task.getId() + " has been changed since it was loaded");
+        assertThatThrownBy(() -> service.update(task.getId(), TaskChanges.status(TaskStatus.COMPLETED), stale))
+                .isInstanceOf(TaskVersionConflictException.class);
+        assertThatThrownBy(() -> service.complete(task.getId(), stale))
+                .isInstanceOf(TaskVersionConflictException.class);
+        assertThatThrownBy(() -> service.delete(task.getId(), stale)).isInstanceOf(TaskVersionConflictException.class);
+
+        Task current = service.get(task.getId());
+        assertThat(current.getDescription()).isEqualTo("Changed elsewhere");
+        assertThat(current.getVersion()).isEqualTo(1);
+    }
+
+    @Test
+    void aConcurrentChangeBetweenReadingAndWritingIsReportedAsAConflict() {
+        Task task = service.create(TaskDetails.of("Draft"));
+        // Another connection changes the row after this transaction has read it.
+        jdbc.update("update task set version = version + 1 where id = ?", task.getId());
+
+        assertThatThrownBy(() -> service.replace(task.getId(), TaskDetails.of("Mine"), ExpectedVersion.ANY))
+                .isInstanceOf(TaskVersionConflictException.class)
+                .hasCauseInstanceOf(OptimisticLockingFailureException.class);
+    }
+
+    @Test
+    void anyOfSeveralExpectedVersionsMayMatch() {
+        Task task = service.create(TaskDetails.of("Draft"));
+
+        service.delete(task.getId(), ExpectedVersion.oneOf(List.of(5L, 0L)));
+
+        assertThat(service.find(task.getId())).isEmpty();
+    }
+
+    @Test
+    void anUnknownTaskIsReportedAsMissingRatherThanChanged() {
+        assertThatThrownBy(() -> service.delete(404, ExpectedVersion.of(0))).isInstanceOf(TaskNotFoundException.class);
     }
 
     @Test
