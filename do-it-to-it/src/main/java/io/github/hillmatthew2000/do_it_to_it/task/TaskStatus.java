@@ -36,8 +36,13 @@ public enum TaskStatus {
                 .findFirst();
     }
 
+    /**
+     * Parses a status like {@link #parse(String)}, failing with a message that lists the accepted values.
+     *
+     * @throws IllegalArgumentException if the value is not a known status
+     */
     @JsonCreator
-    static TaskStatus fromJson(String value) {
+    public static TaskStatus of(String value) {
         return parse(value)
                 .orElseThrow(() -> new IllegalArgumentException(
                         "Unknown status '" + value + "'. Expected one of " + Arrays.toString(values())));

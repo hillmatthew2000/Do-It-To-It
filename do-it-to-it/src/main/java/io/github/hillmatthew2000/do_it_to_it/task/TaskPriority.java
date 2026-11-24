@@ -33,8 +33,14 @@ public enum TaskPriority {
                 .findFirst();
     }
 
+    /**
+     * Parses a priority like {@link #parse(String)}, failing with a message that lists the accepted
+     * values.
+     *
+     * @throws IllegalArgumentException if the value is not a known priority
+     */
     @JsonCreator
-    static TaskPriority fromJson(String value) {
+    public static TaskPriority of(String value) {
         return parse(value)
                 .orElseThrow(() -> new IllegalArgumentException(
                         "Unknown priority '" + value + "'. Expected one of " + Arrays.toString(values())));

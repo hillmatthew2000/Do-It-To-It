@@ -6,6 +6,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.TypeMismatchException;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpStatusCode;
@@ -27,6 +28,7 @@ import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExcep
 class ApiExceptionHandler extends ResponseEntityExceptionHandler {
 
     private static final Logger log = LoggerFactory.getLogger(ApiExceptionHandler.class);
+    private static final String INVALID_REQUEST = "Invalid request";
 
     @ExceptionHandler(TaskNotFoundException.class)
     ProblemDetail handleNotFound(TaskNotFoundException ex) {
@@ -61,6 +63,14 @@ class ApiExceptionHandler extends ResponseEntityExceptionHandler {
         return handleExceptionInternal(ex, problem, headers, status, request);
     }
 
+    /** Invalid query parameters or path variables, such as {@code ?status=someday} or {@code /api/todos/abc}. */
+    @Override
+    protected ResponseEntity<Object> handleTypeMismatch(
+            TypeMismatchException ex, HttpHeaders headers, HttpStatusCode status, WebRequest request) {
+        ProblemDetail problem = invalidRequest(typeMismatchDetail(ex));
+        return handleExceptionInternal(ex, problem, headers, status, request);
+    }
+
     @ExceptionHandler(Exception.class)
     ProblemDetail handleUnexpected(Exception ex) {
         log.error("Unhandled error while processing an API request", ex);
@@ -72,8 +82,19 @@ class ApiExceptionHandler extends ResponseEntityExceptionHandler {
 
     private static ProblemDetail invalidRequest(@Nullable String detail) {
         ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, detail);
-        problem.setTitle("Invalid request");
+        problem.setTitle(INVALID_REQUEST);
         return problem;
+    }
+
+    /** Uses the converters' own messages (they list the accepted values); otherwise names the bad value. */
+    private static String typeMismatchDetail(TypeMismatchException ex) {
+        Throwable cause = ex.getMostSpecificCause();
+        if (cause instanceof IllegalArgumentException
+                && !(cause instanceof NumberFormatException)
+                && cause.getMessage() != null) {
+            return cause.getMessage();
+        }
+        return "'%s' is not a valid value for '%s'".formatted(ex.getValue(), ex.getPropertyName());
     }
 
     /** Surfaces our own enum-parsing messages; hides parser internals for everything else. */

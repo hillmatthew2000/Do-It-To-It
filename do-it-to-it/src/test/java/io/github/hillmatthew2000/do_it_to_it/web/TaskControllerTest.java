@@ -155,8 +155,12 @@ class TaskControllerTest {
     }
 
     @Test
-    void nonNumericIdReturns400() throws Exception {
-        mvc.perform(get("/api/todos/abc")).andExpect(status().isBadRequest());
+    void nonNumericIdReturns400ProblemDetail() throws Exception {
+        mvc.perform(get("/api/todos/abc"))
+                .andExpect(status().isBadRequest())
+                .andExpect(content().contentType(MediaType.APPLICATION_PROBLEM_JSON))
+                .andExpect(jsonPath("$.title").value("Invalid request"))
+                .andExpect(jsonPath("$.detail").value("'abc' is not a valid value for 'id'"));
     }
 
     @Test
@@ -206,9 +210,28 @@ class TaskControllerTest {
     }
 
     @Test
-    void invalidStatusFilterReturns400() throws Exception {
-        mvc.perform(get("/api/todos").param("status", "nope")).andExpect(status().isBadRequest());
+    void invalidStatusFilterReturns400ListingTheAcceptedValues() throws Exception {
+        mvc.perform(get("/api/todos").param("status", "nope"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.title").value("Invalid request"))
+                .andExpect(jsonPath("$.detail")
+                        .value("Unknown status 'nope'. Expected one of [PENDING, IN_PROGRESS, COMPLETED]"));
 
         verify(service, never()).list(any(), any(), any());
+    }
+
+    @Test
+    void invalidSortReturns400WithoutLeakingClassNames() throws Exception {
+        mvc.perform(get("/api/todos").param("sort", "random"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.title").value("Invalid request"))
+                .andExpect(jsonPath("$.detail").value(startsWith("Unknown sort 'random'. Expected one of [OLDEST")));
+    }
+
+    @Test
+    void sortIsCaseInsensitive() throws Exception {
+        given(service.list(null, null, TaskSort.DUE_DATE)).willReturn(List.of());
+
+        mvc.perform(get("/api/todos").param("sort", " due_date ")).andExpect(status().isOk());
     }
 }
