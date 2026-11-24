@@ -27,10 +27,16 @@ class SecurityHeadersFilter extends OncePerRequestFilter {
             "form-action 'self'",
             "frame-ancestors 'self'");
 
+    /** Swagger UI sets a few inline styles, so its pages may use them; scripts stay locked down. */
+    static final String SWAGGER_UI_CONTENT_SECURITY_POLICY =
+            CONTENT_SECURITY_POLICY.replace("style-src 'self'", "style-src 'self' 'unsafe-inline'");
+
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain chain)
             throws ServletException, IOException {
-        response.setHeader("Content-Security-Policy", CONTENT_SECURITY_POLICY);
+        boolean swaggerUi = request.getRequestURI().startsWith(request.getContextPath() + "/swagger-ui/");
+        response.setHeader(
+                "Content-Security-Policy", swaggerUi ? SWAGGER_UI_CONTENT_SECURITY_POLICY : CONTENT_SECURITY_POLICY);
         response.setHeader("X-Content-Type-Options", "nosniff");
         response.setHeader("Referrer-Policy", "no-referrer");
         chain.doFilter(request, response);
